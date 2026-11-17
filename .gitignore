@@ -1,4 +1,6 @@
 store.json
 data.json
 node_modules/
+build/
+*.log
 .DS_Store

@@ -1,0 +1,20 @@
+{
+  "name": "obsidian-local-agent",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Chat agent for your vault, powered by Apple Intelligence or ChatGPT through iOS Shortcuts.",
+  "scripts": {
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs",
+    "test": "vitest run",
+    "deploy": "node scripts/deploy.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.14.4",
+    "tslib": "^2.9.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

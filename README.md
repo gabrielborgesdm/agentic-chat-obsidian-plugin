@@ -25,7 +25,10 @@ The plugin doesn't call any AI service itself. It sends your message to an **iOS
 | --- | --- |
 | Apple Intelligence: on-device | ✅ Supported |
 | Apple Intelligence: Private Cloud | ✅ Supported |
-| ChatGPT, Claude, Gemini, others | 🚧 Planned |
+| ChatGPT | ✅ Supported |
+| Claude, Gemini, others | 🚧 Planned |
+
+Pick the provider in Settings → Local Agent → **Provider**. The same setup steps are shown there, with a **Test** button.
 
 Both Apple options need a device with Apple Intelligence turned on.
 
@@ -43,7 +46,7 @@ Free, offline and private, but a small model with a small context window.
 
 Apple's larger model. Free and private (Apple doesn't store your data), but needs internet. Recommended.
 
-1. In the Shortcuts app, create a new Shortcut named **Local Agent Cloud**.
+1. In the Shortcuts app, create a new Shortcut named **Cloud Agent**. (Older versions used **Local Agent Cloud**. If you have that, keep it, or rename it and tap **Switch** in the plugin settings.)
 2. Tap the **ⓘ** button and set **Receive** to **Text**.
 3. Add **Use Model**. Set the model to **Private Cloud Compute** and the prompt to **Shortcut Input**.
 4. Add **Stop and Output** with **Response** from the step above.
@@ -53,6 +56,19 @@ Tips:
 
 - Also set up the on-device Shortcut. The plugin falls back to it when the cloud is unavailable.
 - If your device offers **Cloud Pro**, pick it in step 3 (larger context, better at following instructions) and raise **Private Cloud prompt budget** to about 30000.
+
+### ChatGPT
+
+Needs the ChatGPT app and an OpenAI account. Your question and the notes the agent reads are sent to OpenAI.
+
+1. Install the **ChatGPT** app and sign in.
+2. In the Shortcuts app, create a new Shortcut named **ChatGPT Agent**.
+3. Tap **ⓘ** and set **Receive** to **Text**.
+4. Add **Ask ChatGPT**. Set its message to **Shortcut Input**. If it offers to show or ask for a prompt, turn that off.
+5. Add **Stop and Output** with ChatGPT's response.
+6. In the plugin settings, set **Provider** to **ChatGPT** and tap **Test**.
+
+Tip: turn on **Fall back to Apple on-device** to keep working when ChatGPT is unavailable.
 
 You can use other Shortcut names, as long as they match the names in the plugin settings.
 

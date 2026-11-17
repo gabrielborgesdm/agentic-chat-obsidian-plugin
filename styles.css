@@ -87,3 +87,10 @@
 .la-user .la-attach-chip { color: var(--text-normal); }
 
 .la-ctx-warn { color: var(--text-warning); border-color: var(--text-warning); }
+
+/* provider setup help (settings) */
+.la-help { margin: 0 0 1em; padding: 0.5em 0.9em; border: 1px solid var(--background-modifier-border); border-radius: 8px; }
+.la-help summary { cursor: pointer; font-weight: 600; }
+.la-help .la-help-heading { margin: 0.8em 0 0.2em; font-weight: 600; }
+.la-help ol, .la-help ul { margin: 0.2em 0 0.6em 1.2em; padding-left: 0.6em; }
+.la-help li { margin: 0.25em 0; }

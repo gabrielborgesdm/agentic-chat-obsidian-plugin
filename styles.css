@@ -1,0 +1,89 @@
+/* Local Agent: uses Obsidian theme variables so it follows light/dark themes. */
+.la-root { display: flex; flex-direction: column; height: 100%; padding: 0 !important; }
+
+.la-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.la-title { font-weight: var(--font-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.la-actions { display: flex; gap: 4px; }
+
+.la-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; user-select: text; }
+.la-row { display: flex; }
+.la-row.la-user { justify-content: flex-end; }
+.la-bubble { max-width: 88%; padding: 8px 12px; border-radius: 16px; line-height: 1.45; word-break: break-word; }
+.la-user .la-bubble { background: var(--interactive-accent); color: var(--text-on-accent); border-bottom-right-radius: 4px; white-space: pre-wrap; }
+.la-assistant .la-bubble { background: var(--background-secondary); color: var(--text-normal); border-bottom-left-radius: 4px; }
+.la-bubble > :first-child { margin-top: 0; }
+.la-bubble > :last-child { margin-bottom: 0; }
+
+.la-error { background: color-mix(in srgb, var(--text-error) 15%, var(--background-secondary)) !important; color: var(--text-error) !important; }
+.la-retry { margin-left: 8px; }
+
+.la-typing { display: flex; align-items: center; gap: 4px; }
+.la-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); animation: la-bounce 1.2s infinite ease-in-out; }
+.la-dot:nth-child(2) { animation-delay: 0.15s; }
+.la-dot:nth-child(3) { animation-delay: 0.3s; }
+.la-status { margin-left: 6px; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+@keyframes la-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+.la-tool { display: flex; align-items: center; gap: 6px; align-self: flex-start; max-width: 92%; padding: 4px 10px; border-radius: 12px; font-size: var(--font-ui-smaller); background: var(--background-primary-alt); border: 1px solid var(--background-modifier-border); color: var(--text-muted); }
+.la-tool.ok .la-tool-icon { color: var(--text-success); }
+.la-tool.fail .la-tool-icon { color: var(--text-error); }
+.la-tool-icon svg { width: 14px; height: 14px; }
+.la-tool-text { overflow-wrap: anywhere; }
+.la-undo { font-size: var(--font-ui-smaller); padding: 0 8px; height: 22px; }
+.la-undone { font-style: italic; }
+
+.la-composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--background-modifier-border); }
+.la-input { flex: 1; resize: none; max-height: 160px; border-radius: 18px; padding: 8px 14px; font-size: 16px; /* 16px prevents iOS zoom */ }
+.la-send, .la-mic { width: 38px; height: 38px; border-radius: 50%; padding: 0; display: flex; align-items: center; justify-content: center; flex: none; }
+
+.la-empty { margin: auto; text-align: center; color: var(--text-muted); display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.la-suggestion { max-width: 100%; white-space: normal; height: auto; padding: 6px 12px; border-radius: 14px; }
+
+.la-approval-preview { max-height: 40vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--background-secondary); padding: 8px; border-radius: 6px; font-size: var(--font-ui-smaller); }
+.la-approval-sub { color: var(--text-muted); margin-top: 0; }
+
+.la-diag-row { white-space: pre-wrap; padding: 6px 0; border-bottom: 1px solid var(--background-modifier-border); font-size: var(--font-ui-small); }
+
+/* Mobile: keep the composer above Obsidian's floating bottom navbar */
+.is-mobile .la-composer {
+  padding-bottom: calc(12px + max(var(--mobile-navbar-height, 0px), 64px) + env(safe-area-inset-bottom, 0px));
+}
+.is-mobile .la-root { padding-bottom: 0; }
+
+/* Long-press menu: bubbles don't trigger the iOS text callout, so the press opens our menu.
+   "Select text" in the menu switches one bubble into native selection mode. */
+.la-bubble, .la-tool {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.la-bubble.la-pressing, .la-tool.la-pressing { transform: scale(0.97); filter: brightness(0.95); }
+.la-bubble.la-selecting, .la-bubble.la-selecting * {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.la-bubble.la-selecting { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
+.la-hint { font-size: var(--font-ui-smaller); color: var(--text-faint); }
+
+/* "This note" pill */
+.la-ctx { display: flex; align-items: center; gap: 4px; padding: 6px 12px 0; }
+.la-ctx-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 80%; padding: 3px 10px; border-radius: 12px; font-size: var(--font-ui-smaller); color: var(--text-muted); background: var(--background-secondary); border: 1px solid var(--background-modifier-border); cursor: pointer; }
+.la-ctx-pill.off { font-style: italic; color: var(--text-faint); }
+.la-ctx-pill .la-tool-icon svg { width: 13px; height: 13px; }
+.la-ctx-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.la-ctx-x { width: 22px; height: 22px; padding: 0; }
+.la-ctx-x svg { width: 13px; height: 13px; }
+
+/* Attachments */
+.la-attach-strip { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 12px 0; }
+.la-attach-strip:empty { display: none; }
+.la-attach-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 3px 4px 3px 8px; border-radius: 12px; font-size: var(--font-ui-smaller); background: var(--background-primary-alt); border: 1px solid var(--background-modifier-border); color: var(--text-normal); }
+.la-attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.la-attach-x { width: 20px; height: 20px; padding: 0; }
+.la-atts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.la-att-img { max-width: 180px; max-height: 180px; border-radius: 10px; object-fit: cover; }
+.la-user .la-attach-chip { color: var(--text-normal); }
+
+.la-ctx-warn { color: var(--text-warning); border-color: var(--text-warning); }

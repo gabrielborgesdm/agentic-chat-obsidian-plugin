@@ -26,6 +26,10 @@ import { VaultService } from "./vault/VaultService";
 
 const CLOUD_PAUSE_MS = 10 * 60 * 1000;
 
+/** set at build time from package.json (esbuild define) */
+declare const __PLUGIN_VERSION__: string;
+const PLUGIN_VERSION = typeof __PLUGIN_VERSION__ === "string" ? __PLUGIN_VERSION__ : "dev";
+
 const today = () => {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
@@ -50,6 +54,28 @@ export default class LocalAgentPlugin extends Plugin {
 
   async onload(): Promise<void> {
     this.settings = sanitizeSettings(Object.assign({}, DEFAULT_SETTINGS, await this.loadData()));
+    // Once: switch off limits still at the old defaults. The plugin now adapts by itself when a
+    // model refuses a long prompt (shorter retry + learned size), so fixed caps only cut answers.
+    if (!this.settings.limitsMigrated) {
+      const s = this.settings;
+      if (s.cloudPromptCharBudget === 16000) s.cloudPromptCharBudget = 0;
+      if (s.chatgptPromptCharBudget === 30000) s.chatgptPromptCharBudget = 0;
+      if (s.maxSteps === 4) s.maxSteps = 0;
+      s.limitsMigrated = true;
+      void this.saveData(s);
+    }
+    // Say which code is really running. iCloud can deliver manifest.json (the version number)
+    // before main.js (the code), so the version baked into the code is the one that counts.
+    if (this.manifest.version !== PLUGIN_VERSION) {
+      new Notice(
+        `Local Agent: the update to v${this.manifest.version} is still downloading (running v${PLUGIN_VERSION}). Reopen Obsidian in a minute.`,
+        10000
+      );
+    } else if (this.settings.lastVersion !== PLUGIN_VERSION) {
+      new Notice(`Local Agent v${PLUGIN_VERSION} loaded`, 6000);
+      this.settings.lastVersion = PLUGIN_VERSION;
+      void this.saveData(this.settings);
+    }
 
     const dir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
     const file = `${dir}/store.json`;
@@ -205,6 +231,15 @@ export default class LocalAgentPlugin extends Plugin {
     this.store.addOp({ id: uid(), ts: Date.now(), kind: "update", path: r.path, before: r.before, after: r.after });
     this.taskCache = null;
     return r.nowDone;
+  }
+
+  /**
+   * Characters of full note text the context can carry for the primary model: most of its
+   * budget, or ~100k characters when it has no limit (a whole project folder fits).
+   */
+  private fullTextBudget(): number {
+    const b = this.effectiveBudget(this.modelRoute().primary);
+    return b > 0 ? Math.floor(b * 0.6) : 100_000;
   }
 
   /** The tier's budget, capped by the size this Shortcut was found to accept (0 = no limit). */
@@ -596,10 +631,16 @@ export default class LocalAgentPlugin extends Plugin {
     this.abort = new AbortController();
     this.emit();
     try {
-      const lastUser = [...conv.messages].reverse().find((m) => m.role === "user");
-      let context = await buildContext(this.vault2, lastUser?.text ?? "", this.currentPath(), {
+      const users = conv.messages.filter((m) => m.role === "user");
+      const lastUser = users[users.length - 1];
+      // Follow-ups ("and Scotland?") are short: search with the previous question too, so the
+      // context stays on the same subject instead of matching random notes.
+      const prevUser = users[users.length - 2];
+      const searchText = [lastUser?.text ?? "", prevUser && (lastUser?.text ?? "").length < 160 ? prevUser.text : ""].join(" ").trim();
+      let context = await buildContext(this.vault2, searchText, this.currentPath(), {
         retrieve: this.settings.autoRetrieve,
         attachmentFolder: this.settings.attachmentFolder,
+        fullTextChars: this.fullTextBudget(),
       });
       const excerpts: string[] = [];
       for (const a of lastUser?.attachments ?? []) {

@@ -1,4 +1,8 @@
 import esbuild from "esbuild";
+import { readFileSync } from "node:fs";
+
+// the version is baked into main.js, so the plugin can tell which code is really running
+const version = JSON.parse(readFileSync("package.json", "utf8")).version;
 
 const prod = process.argv[2] === "production";
 
@@ -14,6 +18,7 @@ const ctx = await esbuild.context({
   minify: prod,
   treeShaking: true,
   outfile: "build/main.js",
+  define: { __PLUGIN_VERSION__: JSON.stringify(version) },
 });
 
 if (prod) {

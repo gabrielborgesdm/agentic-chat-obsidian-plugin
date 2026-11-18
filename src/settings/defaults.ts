@@ -50,6 +50,10 @@ export interface AgentSettings {
   hideMobileNavbar: boolean;
   /** prompt size (characters) each Shortcut was found to accept after failing on a longer one */
   learnedLimits: Record<string, number>;
+  /** plugin version that last ran, to announce updates */
+  lastVersion: string;
+  /** old default limits (16000 / 30000 / 4 steps) were switched off once */
+  limitsMigrated: boolean;
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = {
@@ -57,6 +61,8 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   themeMode: "auto",
   hideMobileNavbar: true,
   learnedLimits: {},
+  lastVersion: "",
+  limitsMigrated: false,
   provider: "apple",
   chatgptShortcutName: "ChatGPT Agent",
   chatgptPromptCharBudget: 0,

@@ -58,7 +58,8 @@
   -webkit-touch-callout: none;
   transition: transform 0.15s ease, filter 0.15s ease;
 }
-.la-bubble.la-pressing, .la-tool.la-pressing { transform: scale(0.97); filter: brightness(0.95); }
+/* holding a message: a soft highlight only, it never moves or changes size */
+.la-bubble.la-pressing, .la-tool.la-pressing { filter: brightness(0.92); }
 .la-bubble.la-selecting, .la-bubble.la-selecting * {
   -webkit-user-select: text;
   user-select: text;
@@ -546,7 +547,7 @@ body.la-app-painted .titlebar {
 body.la-app-painted .view-header-title,
 body.la-app-painted .view-header .clickable-icon { color: var(--text-normal); }
 /* a tall answer with a task list must not shrink as a whole when pressed */
-.la-bubble:has(.la-task-list).la-pressing { transform: none; filter: none; }
+.la-bubble:has(.la-task-list).la-pressing { filter: none; }
 
 /* ================= Markdown inside answers ================= */
 /* bubbles with a table or code block use the whole width */
@@ -583,7 +584,7 @@ body.la-app-painted .view-header .clickable-icon { color: var(--text-normal); }
 .la-table-wrap th, .la-table-wrap td {
   padding: 7px 10px; text-align: left; vertical-align: top;
   border: none; border-bottom: 1px solid var(--background-modifier-border);
-  word-break: normal; overflow-wrap: normal; white-space: normal; min-width: 3.5em;
+  word-break: normal; overflow-wrap: break-word; white-space: normal; min-width: 3.5em;
 }
 .la-table-wrap th {
   font-weight: 600; color: var(--text-muted); font-size: var(--font-ui-smaller);
@@ -618,3 +619,26 @@ body.la-app-painted .view-header .clickable-icon { color: var(--text-normal); }
 /* Obsidian's callouts and embeds stay inside the bubble */
 .la-md-body .callout { margin: 6px 0 10px; border-radius: 10px; }
 .la-md-body .internal-embed, .la-md-body .markdown-embed { max-width: 100%; }
+
+/* tables with 4+ columns: one card per row, "Column: value" lines (fits any phone) */
+.la-table-wrap.la-stacked { overflow: hidden; }
+.la-stacked table, .la-stacked tbody, .la-stacked tr, .la-stacked td { display: block; width: 100%; box-sizing: border-box; }
+.la-stacked thead { display: none; }
+.la-stacked tr { padding: 9px 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.la-stacked tr:last-child { border-bottom: none; }
+.la-stacked td {
+  display: flex; gap: 10px; padding: 2px 0; border: none !important; min-width: 0;
+  overflow-wrap: break-word; font-size: var(--font-ui-small);
+}
+.la-stacked td::before {
+  content: attr(data-label); flex: none; width: 30%; max-width: 110px;
+  color: var(--text-muted); font-size: var(--font-ui-smaller); font-weight: 600; padding-top: 1px;
+}
+.la-stacked td:empty { display: none; }
+/* the first column is the card's title */
+.la-stacked td:first-child { font-weight: 650; color: var(--text-normal); }
+.la-stacked td .la-cell { flex: 1; min-width: 0; overflow-wrap: break-word; }
+.la-stacked td:has(> .la-cell:empty) { display: none; }
+.la-stacked tr.la-head-row { display: none; }
+/* sideways scrolling inside tables and code blocks */
+.la-table-wrap, .la-md-body pre { touch-action: pan-x pan-y; overscroll-behavior-x: contain; }

@@ -7,11 +7,15 @@ import { NotePicker } from "./NotePicker";
 import { PROVIDERS, providerOf } from "../providers/providers";
 import { MODES, THEMES, applyTheme } from "./themes";
 import { openImageViewer } from "./ImageViewer";
+import { unwrapMarkdownFences } from "./markdownFix";
 import { expandTaskEmbeds, linkTaskLines, splitTaskText, type TaskRef } from "./taskLinks";
 import { canSpeak, isSpeaking, speak, stopSpeaking } from "../voice/Voice";
 
 export const VIEW_TYPE = "local-agent-chat";
-const LONG_PRESS_MS = 450;
+/** hold this long to open a message's menu */
+const LONG_PRESS_MS = 600;
+/** the press highlight shows only after holding this long (a tap or scroll shows nothing) */
+const PRESS_HIGHLIGHT_MS = 300;
 
 export class ChatView extends ItemView {
   private listEl!: HTMLElement;
@@ -337,11 +341,14 @@ export class ChatView extends ItemView {
       open(e.clientX, e.clientY);
     });
     let timer: number | null = null;
+    let glow: number | null = null;
     let sx = 0;
     let sy = 0;
     const cancel = () => {
       if (timer !== null) window.clearTimeout(timer);
+      if (glow !== null) window.clearTimeout(glow);
       timer = null;
+      glow = null;
     };
     target.addEventListener(
       "touchstart",
@@ -351,7 +358,11 @@ export class ChatView extends ItemView {
         if ((e.target as HTMLElement | null)?.closest?.(".la-task-row")) return;
         sx = e.touches[0].clientX;
         sy = e.touches[0].clientY;
-        target.addClass("la-pressing");
+        // a quick tap or a scroll shows nothing; the highlight appears only while holding
+        glow = window.setTimeout(() => {
+          glow = null;
+          target.addClass("la-pressing");
+        }, PRESS_HIGHLIGHT_MS);
         timer = window.setTimeout(() => {
           timer = null;
           target.removeClass("la-pressing");
@@ -720,12 +731,12 @@ export class ChatView extends ItemView {
   private async renderAnswer(body: HTMLElement, text: string): Promise<void> {
     const mayListTasks = /\.md\s*:\s*\d+|^\s*[-*+]\s+\[[ xX]\]|\{\{\s*tasks?\s*:/im.test(text);
     const tasks = mayListTasks ? await this.plugin.allTasks().catch(() => []) : [];
-    const expanded = mayListTasks ? expandTaskEmbeds(text, tasks) : text;
+    const expanded = unwrapMarkdownFences(mayListTasks ? expandTaskEmbeds(text, tasks) : text);
     const linked = mayListTasks ? linkTaskLines(expanded, tasks) : null;
     body.addClass("la-md-body");
     if (!linked) {
       await MarkdownRenderer.render(this.app, expanded, body, "", this);
-      polishMarkdown(body);
+      polishWhenRendered(body);
       return;
     }
     body.addClass("la-tasks");
@@ -736,7 +747,7 @@ export class ChatView extends ItemView {
         if (part.text.trim()) {
           const el = body.createDiv("la-md");
           await MarkdownRenderer.render(this.app, part.text, el, "", this);
-          polishMarkdown(el);
+          polishWhenRendered(el);
         }
         continue;
       }
@@ -801,11 +812,62 @@ export class ChatView extends ItemView {
  * of squeezing words letter by letter, and bubbles with tables or code use the full width.
  */
 function polishMarkdown(el: HTMLElement): void {
+  // [[Viagens/2026-11-travel/checklist.md]] shows as "checklist" (like Obsidian does), "hospedagem#Edimburgo" as "hospedagem > Edimburgo"
+  el.querySelectorAll<HTMLAnchorElement>("a.internal-link").forEach((a) => {
+    const href = a.getAttribute("data-href") ?? "";
+    if (!href || a.textContent?.trim() !== href) return;
+    const [file, sub] = href.split("#");
+    const name = (file.split("/").pop() ?? file).replace(/\.md$/i, "");
+    a.setText(sub ? `${name} > ${sub}` : name);
+    a.setAttr("aria-label", href);
+  });
   el.querySelectorAll("table").forEach((table) => {
     if (table.parentElement?.hasClass("la-table-wrap")) return;
     const wrap = createDiv("la-table-wrap");
     table.replaceWith(wrap);
     wrap.appendChild(table);
+    keepGesture(wrap);
+    // 4+ columns can't fit a phone: each row becomes a card of "Column: value" lines
+    const headRow = table.tHead?.rows[0] ?? table.rows[0];
+    const heads = headRow ? Array.from(headRow.cells).map((c) => c.textContent?.trim() ?? "") : [];
+    if (heads.length >= 4) {
+      wrap.addClass("la-stacked");
+      headRow.addClass("la-head-row");
+      Array.from(table.rows)
+        .filter((tr) => tr !== headRow)
+        .forEach((tr) =>
+          Array.from(tr.cells).forEach((td, i) => {
+            td.setAttr("data-label", heads[i] ?? "");
+            // one wrapper per value, so text and links wrap together next to the label
+            const cell = createSpan("la-cell");
+            while (td.firstChild) cell.appendChild(td.firstChild);
+            td.appendChild(cell);
+          })
+        );
+    }
   });
+  el.querySelectorAll("pre").forEach((pre) => keepGesture(pre));
   if (el.querySelector("table, pre")) el.closest(".la-bubble")?.addClass("la-wide");
+}
+
+/**
+ * Sideways scrolling areas (tables, code) keep their touches: no long-press menu or press
+ * highlight on the bubble, and Obsidian's swipe gestures don't take the drag.
+ */
+function keepGesture(node: HTMLElement): void {
+  if (node.dataset.laGesture) return;
+  node.dataset.laGesture = "1";
+  for (const type of ["touchstart", "touchmove", "touchend"]) node.addEventListener(type, (e) => e.stopPropagation(), { passive: true });
+}
+
+/**
+ * Obsidian finishes drawing rendered Markdown after render() returns (tables, links appear a
+ * moment later), so polish now and again whenever content is added, for a few seconds.
+ * polishMarkdown is idempotent: a pass that finds nothing new changes nothing.
+ */
+function polishWhenRendered(el: HTMLElement): void {
+  polishMarkdown(el);
+  const observer = new MutationObserver(() => polishMarkdown(el));
+  observer.observe(el, { childList: true, subtree: true });
+  window.setTimeout(() => observer.disconnect(), 4000);
 }

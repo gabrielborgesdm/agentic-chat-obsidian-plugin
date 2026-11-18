@@ -93,6 +93,21 @@ export class VaultService {
     return { folders, files, path: norm || "/" };
   }
 
+  /** Notes directly inside a folder, with their size in characters (approximately bytes). */
+  notesIn(folder: string): { path: string; size: number }[] {
+    const f = folder ? this.app.vault.getAbstractFileByPath(folder) : this.app.vault.getRoot();
+    if (!(f instanceof TFolder)) return [];
+    return f.children
+      .filter((c): c is TFile => c instanceof TFile && c.extension === "md")
+      .map((c) => ({ path: c.path, size: c.stat.size }));
+  }
+
+  /** Size of a note (0 if it doesn't exist). */
+  sizeOf(path: string): number {
+    const f = this.app.vault.getAbstractFileByPath(path);
+    return f instanceof TFile ? f.stat.size : 0;
+  }
+
   /** Every folder path in the vault (hidden folders left out), sorted. */
   allFolders(): string[] {
     const out: string[] = [];

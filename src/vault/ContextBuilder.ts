@@ -1,3 +1,4 @@
+import { pickContextNotes } from "./projectContext";
 import type { VaultService } from "./VaultService";
 
 /** Folders that never hold notes worth suggesting: attachments, code caches, hidden folders. */
@@ -20,7 +21,7 @@ export async function buildContext(
   vault: VaultService,
   userText: string,
   currentPath: string | null,
-  opts: { retrieve: boolean; attachmentFolder?: string }
+  opts: { retrieve: boolean; attachmentFolder?: string; /** characters available for full note text (0 = none) */ fullTextChars?: number }
 ): Promise<string> {
   const parts: string[] = [];
   if (!currentPath) parts.push("Current note: none open (for 'add' requests use append_to_daily_note).");
@@ -41,17 +42,18 @@ export async function buildContext(
     }
   }
   if (opts.retrieve && userText.trim().length >= 3) {
-    let hits: { path: string; snippet: string }[] = [];
+    let hits: { path: string; snippet: string; score: number }[] = [];
     try {
-      hits = (await vault.search(userText, 4)).filter((h) => h.path !== currentPath).slice(0, 3);
+      hits = (await vault.search(userText, 9)).filter((h) => h.path !== currentPath).slice(0, 8);
     } catch {
       /* ignore retrieval failures */
     }
+    let taskChars = 0;
     // Task/checklist questions: prefetch open tasks, preferring files that matched the search.
-    if (/checklist|check list|tarefa|\btasks?\b|to-?do|pendente|afazer|a fazer/i.test(userText)) {
+    if (isTaskQuestion(userText)) {
       try {
         const all = await vault.listTasks(undefined, "open", 500);
-        const hitPaths = new Set(hits.map((h) => h.path));
+        const hitPaths = new Set(hits.slice(0, 3).map((h) => h.path));
         const preferred = all.filter((t) => hitPaths.has(t.path));
         // generous: the prompt builder trims the context to fit a limited model
         const pick = preferred.length ? preferred.slice(0, 250) : all.slice(0, 80);
@@ -65,13 +67,39 @@ export async function buildContext(
                   : `\n(${all.length - pick.length} more; call list_tasks with a path to get them)`
                 : "")
           );
+          taskChars = parts[parts.length - 1].length;
         }
       } catch {
         /* ignore */
       }
     }
-    if (hits.length) {
-      parts.push("Possibly relevant notes:\n" + hits.map((h) => `- ${h.path}${h.snippet ? ": " + h.snippet.slice(0, 220) : ""}`).join("\n"));
+    // The relevant notes in full (the whole project folder when the hits share one), so most
+    // questions are answered in one round trip without the model having to read notes itself.
+    const included = new Set<string>();
+    const cap = (opts.fullTextChars ?? 0) - taskChars;
+    if (hits.length && cap > 500) {
+      const pick = pickContextNotes(hits, (f) => vault.notesIn(f), (p) => vault.sizeOf(p), cap);
+      const blocks: string[] = [];
+      for (const path of pick.paths) {
+        try {
+          const r = await vault.read(path);
+          blocks.push(`=== ${r.path} ===\n${r.content.trim()}`);
+          included.add(r.path);
+        } catch {
+          /* vanished */
+        }
+      }
+      if (blocks.length) {
+        parts.push(
+          `Notes in full (${pick.project ? `folder "${pick.project}", ` : ""}most relevant first; answer from these, no need to read_note them):\n\n` +
+            blocks.join("\n\n") +
+            (pick.left.length ? `\n\n(Not included, read_note if needed: ${pick.left.join(", ")})` : "")
+        );
+      }
+    }
+    const rest = hits.filter((h) => !included.has(h.path));
+    if (rest.length) {
+      parts.push("Possibly relevant notes:\n" + rest.map((h) => `- ${h.path}${h.snippet ? ": " + h.snippet.slice(0, 220) : ""}`).join("\n"));
     }
   }
   try {
@@ -82,4 +110,12 @@ export async function buildContext(
     /* ignore */
   }
   return parts.join("\n\n");
+}
+
+/**
+ * Questions about tasks / checklists. Not "todo"/"todos": in Portuguese they mean "all"
+ * ("todos os passeios"), and matching them filled the prompt with checklist items.
+ */
+export function isTaskQuestion(text: string): boolean {
+  return /\b(check[\s-]?lists?|tarefas?|tasks?|to-dos?|to do list|todo list|pend[eê]ncias?|pendentes?|afazeres|a fazer|falta fazer|reminders?|lembretes?)\b/i.test(text);
 }

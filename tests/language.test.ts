@@ -48,3 +48,18 @@ describe("context order and folders", () => {
     expect(p).toContain("TASK-THAT-MATTERS");
   });
 });
+
+import { isTaskQuestion } from "../src/vault/ContextBuilder";
+describe("isTaskQuestion", () => {
+  it("does not treat 'todos' (all) as a to-do question", () => {
+    expect(isTaskQuestion("Eu quero que cê olhe em todos os passeios e tours e o itinerário")).toBe(false);
+    expect(isTaskQuestion("me dá todo o roteiro")).toBe(false);
+  });
+  it("recognizes real task questions", () => {
+    expect(isTaskQuestion("quais check list estão abertos")).toBe(true);
+    expect(isTaskQuestion("What are my open checklist for the travel")).toBe(true);
+    expect(isTaskQuestion("Quais são as minhas tarefas abertas")).toBe(true);
+    expect(isTaskQuestion("show my to-dos")).toBe(true);
+    expect(isTaskQuestion("o que falta fazer pra viagem")).toBe(true);
+  });
+});

@@ -24,8 +24,9 @@ export type TraceEntry =
 
 export type ModelTrace = Extract<TraceEntry, { kind: "model" }>;
 
-const MAX_ENTRIES = 80;
-const MAX_CHARS = 1_500_000;
+const MAX_ENTRIES = 40;
+/** kept small: the file lives in the iCloud vault and is rewritten after every message */
+const MAX_CHARS = 250_000;
 
 export class Trace {
   entries: TraceEntry[] = [];

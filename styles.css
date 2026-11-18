@@ -68,8 +68,8 @@
 .la-hint { font-size: var(--font-ui-smaller); color: var(--text-faint); }
 
 /* "This note" pill */
-.la-ctx { display: flex; align-items: center; gap: 4px; padding: 6px 12px 0; }
-.la-ctx-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 80%; padding: 3px 10px; border-radius: 12px; font-size: var(--font-ui-smaller); color: var(--text-muted); background: var(--background-secondary); border: 1px solid var(--background-modifier-border); cursor: pointer; }
+.la-ctx { display: flex; align-items: center; gap: 4px; padding: 6px 12px 8px; }
+.la-ctx-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 80%; min-width: 0; padding: 3px 10px; border-radius: 12px; font-size: var(--font-ui-smaller); color: var(--text-muted); background: var(--background-secondary); border: 1px solid var(--background-modifier-border); cursor: pointer; }
 .la-ctx-pill.off { font-style: italic; color: var(--text-faint); }
 .la-ctx-pill .la-tool-icon svg { width: 13px; height: 13px; }
 .la-ctx-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -86,6 +86,9 @@
 .la-att-img { max-width: 180px; max-height: 180px; border-radius: 10px; object-fit: cover; }
 .la-user .la-attach-chip { color: var(--text-normal); }
 
+.la-provider-pill { margin-left: auto; flex: none; max-width: 45%; font-style: normal; color: var(--text-muted); }
+.la-attach-strip:not(:empty) { padding-bottom: 8px; }
+
 .la-ctx-warn { color: var(--text-warning); border-color: var(--text-warning); }
 
 /* provider setup help (settings) */
@@ -94,3 +97,376 @@
 .la-help .la-help-heading { margin: 0.8em 0 0.2em; font-weight: 600; }
 .la-help ol, .la-help ul { margin: 0.2em 0 0.6em 1.2em; padding-left: 0.6em; }
 .la-help li { margin: 0.25em 0; }
+
+/* ================= Chat themes =================
+   A theme overrides Obsidian's color variables inside the chat only, so every
+   bubble, pill, input and button follows it. Set by data-la-theme / data-la-mode. */
+
+/* Cherry: deep red, inspired by the red iPhone Pro finish */
+.la-root[data-la-theme="cherry"][data-la-mode="light"] {
+  --background-primary: #fbf7f7;
+  --background-secondary: #f1e8e9;
+  --background-primary-alt: #ffffff;
+  --background-modifier-border: rgba(90, 20, 32, 0.12);
+  --text-normal: #1d1214;
+  --text-muted: #6f5c60;
+  --text-faint: #a7979b;
+  --text-accent: #a4132f;
+  --interactive-accent: #a4132f;
+  --interactive-accent-hover: #8a0f27;
+  --text-on-accent: #ffffff;
+  --la-user-bubble: linear-gradient(140deg, #c8213f 0%, #9a1030 55%, #7a0b26 100%);
+  --la-glow: rgba(164, 19, 47, 0.22);
+}
+.la-root[data-la-theme="cherry"][data-la-mode="dark"] {
+  --background-primary: #110a0c;
+  --background-secondary: #23171a;
+  --background-primary-alt: #1a1013;
+  --background-modifier-border: rgba(255, 210, 218, 0.1);
+  --text-normal: #f6edef;
+  --text-muted: #b8a2a8;
+  --text-faint: #7e6a70;
+  --text-accent: #ff5c78;
+  --interactive-accent: #d8314f;
+  --interactive-accent-hover: #e8445f;
+  --text-on-accent: #ffffff;
+  --la-user-bubble: linear-gradient(140deg, #e03a57 0%, #a8173a 55%, #7d0d2a 100%);
+  --la-glow: rgba(224, 58, 87, 0.28);
+}
+
+/* Graphite: iOS system grays with Messages blue */
+.la-root[data-la-theme="graphite"][data-la-mode="light"] {
+  --background-primary: #f2f2f7;
+  --background-secondary: #ffffff;
+  --background-primary-alt: #ffffff;
+  --background-modifier-border: rgba(60, 60, 67, 0.16);
+  --text-normal: #000000;
+  --text-muted: #6c6c70;
+  --text-faint: #aeaeb2;
+  --text-accent: #007aff;
+  --interactive-accent: #007aff;
+  --interactive-accent-hover: #0066d6;
+  --text-on-accent: #ffffff;
+  --la-user-bubble: linear-gradient(180deg, #1a8cff 0%, #007aff 100%);
+  --la-glow: rgba(0, 122, 255, 0.18);
+}
+.la-root[data-la-theme="graphite"][data-la-mode="dark"] {
+  --background-primary: #000000;
+  --background-secondary: #1c1c1e;
+  --background-primary-alt: #2c2c2e;
+  --background-modifier-border: rgba(84, 84, 88, 0.55);
+  --text-normal: #ffffff;
+  --text-muted: #98989f;
+  --text-faint: #636366;
+  --text-accent: #0a84ff;
+  --interactive-accent: #0a84ff;
+  --interactive-accent-hover: #409cff;
+  --text-on-accent: #ffffff;
+  --la-user-bubble: linear-gradient(180deg, #2a95ff 0%, #0a84ff 100%);
+  --la-glow: rgba(10, 132, 255, 0.25);
+}
+
+/* Ocean: calm teal and deep blue */
+.la-root[data-la-theme="ocean"][data-la-mode="light"] {
+  --background-primary: #f3f8fa;
+  --background-secondary: #e3eef2;
+  --background-primary-alt: #ffffff;
+  --background-modifier-border: rgba(10, 60, 80, 0.12);
+  --text-normal: #0d1b21;
+  --text-muted: #57707a;
+  --text-faint: #98aab1;
+  --text-accent: #0b7a8a;
+  --interactive-accent: #0b7a8a;
+  --interactive-accent-hover: #086674;
+  --text-on-accent: #ffffff;
+  --la-user-bubble: linear-gradient(140deg, #17a3b4 0%, #0d7d95 55%, #0a5f80 100%);
+  --la-glow: rgba(11, 122, 138, 0.2);
+}
+.la-root[data-la-theme="ocean"][data-la-mode="dark"] {
+  --background-primary: #081217;
+  --background-secondary: #13232a;
+  --background-primary-alt: #0e1b21;
+  --background-modifier-border: rgba(160, 220, 235, 0.1);
+  --text-normal: #e8f3f6;
+  --text-muted: #8ea8b0;
+  --text-faint: #5b737b;
+  --text-accent: #4fd0de;
+  --interactive-accent: #1e9fb3;
+  --interactive-accent-hover: #2bb3c7;
+  --text-on-accent: #ffffff;
+  --la-user-bubble: linear-gradient(140deg, #25b2c4 0%, #13809c 55%, #0b5a76 100%);
+  --la-glow: rgba(37, 178, 196, 0.25);
+}
+
+/* Sage: soft green, paper-like */
+.la-root[data-la-theme="sage"][data-la-mode="light"] {
+  --background-primary: #f6f7f2;
+  --background-secondary: #e8ece0;
+  --background-primary-alt: #ffffff;
+  --background-modifier-border: rgba(40, 60, 30, 0.12);
+  --text-normal: #1a1f16;
+  --text-muted: #626b5a;
+  --text-faint: #a0a897;
+  --text-accent: #4b7537;
+  --interactive-accent: #4b7537;
+  --interactive-accent-hover: #3d622c;
+  --text-on-accent: #ffffff;
+  --la-user-bubble: linear-gradient(140deg, #6b9b4f 0%, #4b7537 60%, #3a5e2a 100%);
+  --la-glow: rgba(75, 117, 55, 0.2);
+}
+.la-root[data-la-theme="sage"][data-la-mode="dark"] {
+  --background-primary: #0e110c;
+  --background-secondary: #1b2017;
+  --background-primary-alt: #151a12;
+  --background-modifier-border: rgba(200, 230, 180, 0.1);
+  --text-normal: #eef2e8;
+  --text-muted: #9ca893;
+  --text-faint: #66705e;
+  --text-accent: #9fd27f;
+  --interactive-accent: #5f9446;
+  --interactive-accent-hover: #6fa555;
+  --text-on-accent: #ffffff;
+  --la-user-bubble: linear-gradient(140deg, #75aa58 0%, #538240 60%, #375a29 100%);
+  --la-glow: rgba(117, 170, 88, 0.22);
+}
+
+/* Shared look for every theme: iOS-like type, soft bubbles, pill input */
+.la-root[data-la-theme] {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.la-root[data-la-theme] .la-header {
+  border-bottom-color: transparent;
+  box-shadow: 0 1px 0 var(--background-modifier-border);
+}
+.la-root[data-la-theme] .la-title { letter-spacing: -0.01em; }
+.la-root[data-la-theme] .la-messages { gap: 10px; }
+.la-root[data-la-theme] .la-bubble { border-radius: 20px; padding: 9px 14px; letter-spacing: -0.005em; }
+.la-root[data-la-theme] .la-user .la-bubble {
+  background: var(--la-user-bubble);
+  border-bottom-right-radius: 6px;
+  box-shadow: 0 4px 14px -6px var(--la-glow);
+}
+.la-root[data-la-theme] .la-assistant .la-bubble {
+  border-bottom-left-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.la-root[data-la-theme][data-la-mode="light"] .la-assistant .la-bubble { border: 1px solid var(--background-modifier-border); }
+.la-root[data-la-theme] .la-tool,
+.la-root[data-la-theme] .la-ctx-pill { border-radius: 999px; }
+.la-root[data-la-theme] .la-composer {
+  border-top-color: var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-primary) 82%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+}
+.la-root[data-la-theme] .la-input {
+  background: var(--background-primary-alt);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  border-radius: 20px;
+  box-shadow: none;
+}
+.la-root[data-la-theme] .la-input:focus {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 3px var(--la-glow);
+}
+.la-root[data-la-theme] .la-send.mod-cta {
+  background: var(--la-user-bubble);
+  color: var(--text-on-accent);
+  box-shadow: 0 3px 10px -3px var(--la-glow);
+}
+.la-root[data-la-theme] .la-suggestion {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  box-shadow: none;
+}
+.la-root[data-la-theme] .la-bubble a,
+.la-root[data-la-theme] .la-bubble .internal-link { color: var(--text-accent); }
+.la-root[data-la-theme] .la-user .la-bubble a,
+.la-root[data-la-theme] .la-user .la-bubble .internal-link { color: inherit; text-decoration: underline; }
+
+/* ================= Image viewer ================= */
+.la-bubble img { cursor: zoom-in; }
+.la-viewer {
+  --la-viewer-dim: 1;
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-modal, 50);
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, calc(0.94 * var(--la-viewer-dim)));
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  color: #fff;
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity 0.2s ease, transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+}
+.la-viewer.is-open { opacity: 1; transform: none; }
+.la-viewer.is-closing { opacity: 0; transform: scale(0.9); }
+.la-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 10px 8px;
+  opacity: var(--la-viewer-dim);
+}
+.la-viewer-title {
+  flex: 1;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.la-viewer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 40px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: none;
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+.la-viewer-btn:hover { background: rgba(255, 255, 255, 0.24); }
+.la-viewer-btn svg { width: 20px; height: 20px; }
+.la-viewer-back { padding: 0 12px 0 6px; }
+.la-viewer-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  cursor: zoom-in;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.la-viewer-stage.is-zoomed { cursor: grab; }
+.la-viewer-stage.is-zoomed:active { cursor: grabbing; }
+.la-viewer-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transform-origin: center center;
+  will-change: transform;
+}
+.la-viewer-img.is-animating { transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* ================= Welcome screen ================= */
+.la-welcome { margin: auto 0; display: flex; flex-direction: column; gap: 18px; padding: 12px 2px 4px; }
+.la-welcome-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+.la-welcome-mark {
+  width: 56px; height: 56px; border-radius: 18px; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-on-accent);
+  background: var(--la-user-bubble, linear-gradient(140deg, var(--interactive-accent), var(--interactive-accent-hover)));
+  box-shadow: 0 10px 24px -10px var(--la-glow, rgba(0, 0, 0, 0.35));
+}
+.la-welcome-mark svg { width: 28px; height: 28px; }
+.la-welcome-title { font-size: 1.6em; font-weight: 700; letter-spacing: -0.02em; color: var(--text-normal); }
+.la-welcome-sub { color: var(--text-muted); max-width: 300px; line-height: 1.4; }
+.la-welcome-badge {
+  margin-top: 4px; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px;
+  border-radius: 999px; font-size: var(--font-ui-smaller); color: var(--text-muted);
+  background: var(--background-secondary); border: 1px solid var(--background-modifier-border); cursor: pointer;
+}
+.la-welcome-badge svg { width: 13px; height: 13px; }
+
+.la-welcome-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.la-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  height: auto; min-height: 92px; padding: 12px 14px; border-radius: 16px; white-space: normal;
+  background: var(--background-secondary); border: 1px solid var(--background-modifier-border);
+  box-shadow: none; color: var(--text-normal); cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.la-card:hover { border-color: var(--interactive-accent); }
+.la-card:active { transform: scale(0.97); }
+.la-card-icon {
+  width: 30px; height: 30px; border-radius: 9px; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+.la-card-icon svg { width: 17px; height: 17px; }
+.la-card-title { font-weight: 600; font-size: var(--font-ui-medium); }
+.la-card-sub {
+  color: var(--text-muted); font-size: var(--font-ui-smaller); line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-width: 100%;
+}
+
+.la-welcome-cmds { border-radius: 16px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); overflow: hidden; }
+.la-welcome-cmds summary { display: flex; align-items: center; gap: 8px; padding: 12px 14px; cursor: pointer; font-weight: 600; list-style: none; }
+.la-welcome-cmds summary::-webkit-details-marker { display: none; }
+.la-welcome-cmds summary::after { content: "›"; margin-left: auto; color: var(--text-faint); font-size: 1.3em; transition: transform 0.15s ease; }
+.la-welcome-cmds[open] summary::after { transform: rotate(90deg); }
+.la-cmds-icon { color: var(--interactive-accent); display: flex; }
+.la-cmds-icon svg { width: 16px; height: 16px; }
+.la-cmds-hint { font-weight: 400; color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.la-cmd-row {
+  display: flex; align-items: baseline; gap: 10px; width: 100%; height: auto; padding: 9px 14px; text-align: left;
+  background: transparent; border: none; border-top: 1px solid var(--background-modifier-border); border-radius: 0;
+  box-shadow: none; white-space: normal; cursor: pointer; color: var(--text-normal);
+}
+.la-cmd-row:hover { background: var(--background-modifier-hover); }
+.la-cmd { font-family: var(--font-monospace); color: var(--interactive-accent); font-weight: 600; flex: none; }
+.la-cmd-desc { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.la-welcome .la-hint { text-align: center; }
+
+/* ================= Provider setup guide (after a failure) ================= */
+.la-setup {
+  align-self: stretch; display: flex; flex-direction: column; gap: 10px; padding: 14px;
+  border-radius: 18px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border);
+}
+.la-setup-head { display: flex; gap: 12px; align-items: flex-start; }
+.la-setup-icon {
+  flex: none; width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  color: var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+.la-setup-icon svg { width: 18px; height: 18px; }
+.la-setup-title { font-weight: 700; }
+.la-setup-sub { color: var(--text-muted); font-size: var(--font-ui-small); line-height: 1.35; }
+.la-setup-steps summary { cursor: pointer; font-weight: 600; font-size: var(--font-ui-small); color: var(--text-accent); }
+.la-setup-group { margin: 10px 0 2px; font-weight: 600; font-size: var(--font-ui-small); }
+.la-setup-steps ol { margin: 4px 0 6px; padding-left: 1.4em; }
+.la-setup-steps li { margin: 4px 0; line-height: 1.4; }
+.la-setup-notes { margin: 6px 0 0; padding-left: 1.2em; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.la-setup-status:empty { display: none; }
+.la-setup-status { font-size: var(--font-ui-small); color: var(--text-error); }
+.la-setup-status.ok { color: var(--text-success); }
+.la-setup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.la-setup-btn { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 14px; height: auto; }
+.la-setup-btn svg { width: 15px; height: 15px; }
+
+/* ================= Full-screen chat (mobile) =================
+   While the chat is the active screen, hide Obsidian's floating bottom bar
+   and let the composer sit on the bottom edge (above the home indicator). */
+body.la-chat-focus { --mobile-navbar-height: 0px; }
+body.la-chat-focus .mobile-navbar { display: none !important; }
+body.la-chat-focus.is-mobile .la-composer { padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+
+/* ================= Header options button ================= */
+.la-icon-btn { position: relative; }
+.la-icon-btn.la-has-note::after,
+.la-icon-btn.la-has-warning::after {
+  content: ""; position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--interactive-accent); box-shadow: 0 0 0 2px var(--background-primary);
+}
+.la-icon-btn.la-has-warning::after { background: var(--text-warning); }
+.la-attach-strip:not(:empty) { padding-top: 8px; }

@@ -1,11 +1,20 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type LocalAgentPlugin from "../main";
 import { DEFAULT_SETTINGS, type AgentSettings, type ModelMode, type ProviderId } from "./defaults";
+import { MODES, THEMES, type ThemeId, type ThemeMode } from "../ui/themes";
 import { OLD_CLOUD_NAME, PROVIDERS, providerOf, type HelpSection } from "../providers/providers";
 
 export class AgentSettingsTab extends PluginSettingTab {
   constructor(app: App, private plugin: LocalAgentPlugin) {
     super(app, plugin);
+  }
+
+  /** Redraws the page without jumping back to the top. */
+  private redraw(): void {
+    const scrollers = [this.containerEl, this.containerEl.parentElement].filter((e): e is HTMLElement => !!e);
+    const tops = scrollers.map((e) => e.scrollTop);
+    this.display();
+    scrollers.forEach((e, i) => (e.scrollTop = tops[i]));
   }
 
   display(): void {
@@ -19,7 +28,47 @@ export class AgentSettingsTab extends PluginSettingTab {
       text: `${this.plugin.manifest.name} v${this.plugin.manifest.version}`,
     });
 
-    // ---------------- provider ----------------
+    this.appearanceSection(containerEl, s);
+    this.agentSection(containerEl, s, save);
+    this.providerSection(containerEl, s, save);
+    this.linkAndDebugSection(containerEl);
+  }
+
+  private appearanceSection(containerEl: HTMLElement, s: AgentSettings): void {
+    new Setting(containerEl).setName("Appearance").setHeading();
+    let modeRow: Setting | null = null;
+    new Setting(containerEl)
+      .setName("Chat theme")
+      .setDesc("Colors of the chat view. Also in the chat's ⋯ menu.")
+      .addDropdown((d) => {
+        for (const t of THEMES) d.addOption(t.id, t.label);
+        d.setValue(s.theme).onChange((v) => {
+          void this.plugin.setAppearance({ theme: v as ThemeId });
+          // show/hide the light-dark row in place: no redraw, no jump to the top
+          modeRow?.settingEl.toggle(v !== "obsidian");
+        });
+      });
+    modeRow = new Setting(containerEl)
+      .setName("Light or dark")
+      .setDesc("Auto follows the device's light/dark setting.")
+      .addDropdown((d) => {
+        for (const m of MODES) d.addOption(m.id, m.label);
+        d.setValue(s.themeMode).onChange((v) => void this.plugin.setAppearance({ themeMode: v as ThemeMode }));
+      });
+    modeRow.settingEl.toggle(s.theme !== "obsidian");
+    new Setting(containerEl)
+      .setName("Full-screen chat on iPhone")
+      .setDesc("Hides Obsidian's floating bottom bar (search, new, tabs, menu) while the chat is open. It comes back when you open a note.")
+      .addToggle((t) =>
+        t.setValue(s.hideMobileNavbar).onChange((v) => {
+          s.hideMobileNavbar = v;
+          void this.plugin.saveSettings();
+          this.plugin.syncMobileChrome();
+        })
+      );
+  }
+
+  private providerSection(containerEl: HTMLElement, s: AgentSettings, save: () => void): void {
     new Setting(containerEl).setName("AI provider").setHeading();
     new Setting(containerEl)
       .setName("Provider")
@@ -29,7 +78,7 @@ export class AgentSettingsTab extends PluginSettingTab {
         d.setValue(s.provider).onChange((v) => {
           s.provider = v as ProviderId;
           save();
-          this.display();
+          this.redraw();
         });
       });
 
@@ -47,8 +96,9 @@ export class AgentSettingsTab extends PluginSettingTab {
           save();
         })
       );
+  }
 
-    // ---------------- deep link ----------------
+  private linkAndDebugSection(containerEl: HTMLElement): void {
     new Setting(containerEl).setName("Deep link to the chat").setHeading();
     const link = this.plugin.deepLink();
     new Setting(containerEl)
@@ -61,17 +111,28 @@ export class AgentSettingsTab extends PluginSettingTab {
         })
       );
 
-    // ---------------- agent ----------------
-    new Setting(containerEl).setName("Agent").setHeading();
+    new Setting(containerEl).setName("Debugging").setHeading();
     new Setting(containerEl)
-      .setName("Max steps per request")
-      .setDesc("Each model call switches to the Shortcuts app and back, so keep this low.")
-      .addSlider((sl) =>
-        sl.setLimits(1, 8, 1).setValue(s.maxSteps).setDynamicTooltip().onChange((v) => {
-          s.maxSteps = v;
-          save();
-        })
-      );
+      .setName("Copy chat report")
+      .setDesc(
+        "Copies the current chat for debugging: messages, settings, each prompt sent to the model, its raw reply, and tool results. It includes the text of notes the agent read, so check it before sharing."
+      )
+      .addButton((b) => b.setButtonText("Copy report").onClick(() => void this.plugin.copyReport()));
+  }
+
+  private agentSection(containerEl: HTMLElement, s: AgentSettings, save: () => void): void {
+    new Setting(containerEl).setName("Agent").setHeading();
+    this.limitSetting(containerEl, {
+      name: "Limit steps per request",
+      desc: "Off: the agent keeps going until it's done (tap Stop to end it). Each step switches to the Shortcuts app and back.",
+      get: () => s.maxSteps,
+      set: (v) => (s.maxSteps = v),
+      on: 4,
+      min: 1,
+      max: 20,
+      step: 1,
+      save,
+    });
     new Setting(containerEl)
       .setName("On-device prompt budget (characters)")
       .setDesc("Apple's on-device model has a small context window. Lower this if you see errors on long chats.")
@@ -124,8 +185,8 @@ export class AgentSettingsTab extends PluginSettingTab {
     // ---------------- permissions ----------------
     new Setting(containerEl).setName("Permissions").setHeading();
     new Setting(containerEl)
-      .setName("Create notes automatically")
-      .setDesc("When off, you approve each new note. Existing notes are never overwritten by creation.")
+      .setName("Create notes without asking")
+      .setDesc("Off (recommended): you see the suggested folder and name for each new note, and can accept or change them. Existing notes are never overwritten by creation.")
       .addToggle((t) =>
         t.setValue(s.autoCreate).onChange((v) => {
           s.autoCreate = v;
@@ -180,7 +241,7 @@ export class AgentSettingsTab extends PluginSettingTab {
   /** Setup steps for the selected provider, shown right under the dropdown. */
   private renderHelp(el: HTMLElement, help: HelpSection): void {
     const box = el.createEl("details", { cls: "la-help" });
-    box.open = true;
+    box.open = false; // collapsed so the provider section stays short
     box.createEl("summary", { text: help.title });
     for (const g of help.groups) {
       if (g.heading) box.createEl("p", { cls: "la-help-heading", text: g.heading });
@@ -202,7 +263,7 @@ export class AgentSettingsTab extends PluginSettingTab {
         .addButton((b) =>
           b.setButtonText("Use Private Cloud now").setCta().onClick(() => {
             this.plugin.resumeCloud();
-            this.display();
+            this.redraw();
           })
         );
     }
@@ -241,7 +302,7 @@ export class AgentSettingsTab extends PluginSettingTab {
           b.setButtonText("Switch").onClick(() => {
             s.cloudShortcutName = DEFAULT_SETTINGS.cloudShortcutName;
             save();
-            this.display();
+            this.redraw();
           })
         );
     }
@@ -254,12 +315,40 @@ export class AgentSettingsTab extends PluginSettingTab {
           save();
         })
       );
-    new Setting(el)
-      .setName("Private Cloud prompt budget (characters)")
-      .addSlider((sl) =>
-        sl.setLimits(8000, 40000, 1000).setValue(s.cloudPromptCharBudget).setDynamicTooltip().onChange((v) => {
-          s.cloudPromptCharBudget = v;
-          save();
+    this.limitSetting(el, {
+      name: "Limit Private Cloud prompt length",
+      desc: "Off: whole notes and the full chat are sent. Turn on only if Private Cloud fails on long requests.",
+      get: () => s.cloudPromptCharBudget,
+      set: (v) => (s.cloudPromptCharBudget = v),
+      on: 16000,
+      min: 8000,
+      max: 60000,
+      step: 1000,
+      save,
+    });
+  }
+
+  /** A toggle that turns a numeric limit on (with a slider) or off (stored as 0). */
+  private limitSetting(
+    el: HTMLElement,
+    o: { name: string; desc: string; get: () => number; set: (v: number) => void; on: number; min: number; max: number; step: number; save: () => void }
+  ): void {
+    const limited = o.get() > 0;
+    const setting = new Setting(el)
+      .setName(o.name)
+      .setDesc(o.desc)
+      .addToggle((t) =>
+        t.setValue(limited).onChange((v) => {
+          o.set(v ? o.on : 0);
+          o.save();
+          this.redraw();
+        })
+      );
+    if (limited)
+      setting.addSlider((sl) =>
+        sl.setLimits(o.min, o.max, o.step).setValue(o.get()).setDynamicTooltip().onChange((v) => {
+          o.set(v);
+          o.save();
         })
       );
   }
@@ -274,15 +363,17 @@ export class AgentSettingsTab extends PluginSettingTab {
           save();
         })
       );
-    new Setting(el)
-      .setName("ChatGPT prompt budget (characters)")
-      .setDesc("ChatGPT has a large context window. Lower this if requests are slow.")
-      .addSlider((sl) =>
-        sl.setLimits(8000, 60000, 2000).setValue(s.chatgptPromptCharBudget).setDynamicTooltip().onChange((v) => {
-          s.chatgptPromptCharBudget = v;
-          save();
-        })
-      );
+    this.limitSetting(el, {
+      name: "Limit ChatGPT prompt length",
+      desc: "Off: whole notes and the full chat are sent. Turn on if requests get slow.",
+      get: () => s.chatgptPromptCharBudget,
+      set: (v) => (s.chatgptPromptCharBudget = v),
+      on: 30000,
+      min: 8000,
+      max: 100000,
+      step: 2000,
+      save,
+    });
     new Setting(el)
       .setName("Fall back to Apple on-device")
       .setDesc(
@@ -308,28 +399,15 @@ export class AgentSettingsTab extends PluginSettingTab {
       );
     setting.addButton((b) =>
       b.setButtonText("Test").setCta().onClick(async () => {
-        const sc = this.plugin.shortcut;
-        if (!sc) {
+        if (!this.plugin.shortcut) {
           new Notice("The test needs the iPhone: on desktop the plugin uses a mock model.");
           return;
         }
-        const name = provider.testShortcut(this.plugin.settings);
         b.setDisabled(true);
-        setting.setDesc(`Running “${name}”…`);
-        const t0 = Date.now();
-        try {
-          const r = await sc.run(name, "Reply with exactly the single word: PONG");
-          const secs = ((Date.now() - t0) / 1000).toFixed(1);
-          setting.setDesc(
-            /pong/i.test(r.result)
-              ? `✅ “${name}” works (${secs}s).`
-              : `⚠️ “${name}” answered, but not as expected: ${r.result.slice(0, 80).replace(/\n/g, " ")}. Check the last steps above.`
-          );
-        } catch (e: any) {
-          setting.setDesc(`❌ “${name}” failed: ${e?.message ?? e}. Check the setup steps above.`);
-        } finally {
-          b.setDisabled(false);
-        }
+        setting.setDesc(`Running “${provider.testShortcut(this.plugin.settings)}”…`);
+        const r = await this.plugin.testProvider();
+        setting.setDesc(r.ok ? r.text : `${r.text} Check the setup steps above.`);
+        b.setDisabled(false);
       })
     );
     setting.addButton((b) => b.setButtonText("More checks").onClick(() => this.plugin.openDiagnostics()));

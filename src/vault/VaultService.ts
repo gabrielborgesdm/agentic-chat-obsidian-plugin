@@ -93,6 +93,35 @@ export class VaultService {
     return { folders, files, path: norm || "/" };
   }
 
+  /** Every folder path in the vault (hidden folders left out), sorted. */
+  allFolders(): string[] {
+    const out: string[] = [];
+    const walk = (folder: TFolder) => {
+      for (const c of folder.children) {
+        if (c instanceof TFolder && !c.name.startsWith(".")) {
+          out.push(c.path);
+          walk(c);
+        }
+      }
+    };
+    walk(this.app.vault.getRoot());
+    return out.sort((a, b) => a.localeCompare(b));
+  }
+
+  /** Folders holding the notes most similar to `text`, best first ("" = vault root). */
+  async suggestFolders(text: string, limit = 4): Promise<string[]> {
+    const hits = await this.search(text.slice(0, 400), 10);
+    const score = new Map<string, number>();
+    for (const h of hits) {
+      const f = parentFolder(h.path);
+      score.set(f, (score.get(f) ?? 0) + h.score);
+    }
+    return [...score.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([f]) => f)
+      .slice(0, limit);
+  }
+
   metadata(input: unknown) {
     const f = this.requireFile(input);
     const c = this.app.metadataCache.getFileCache(f);

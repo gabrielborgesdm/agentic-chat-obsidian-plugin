@@ -19,7 +19,7 @@ describe("defaults and migration", () => {
     expect(DEFAULT_SETTINGS.chatgptShortcutName).toBe("ChatGPT Agent");
     expect(DEFAULT_SETTINGS.provider).toBe("apple");
     expect(DEFAULT_SETTINGS.chatgptFallback).toBe(false);
-    expect(DEFAULT_SETTINGS.chatgptPromptCharBudget).toBe(30000);
+    expect(DEFAULT_SETTINGS.chatgptPromptCharBudget).toBe(0);
   });
 
   it("an unknown provider id falls back to Apple", () => {
@@ -31,7 +31,7 @@ describe("defaults and migration", () => {
 describe("Apple routing (unchanged behavior)", () => {
   it("Private Cloud first with on-device fallback", () => {
     const r = PROVIDERS.apple.route(S(), 0, 0);
-    expect(r.primary).toMatchObject({ shortcut: "Cloud Agent", label: "Private Cloud", pausable: true, budget: 16000 });
+    expect(r.primary).toMatchObject({ shortcut: "Cloud Agent", label: "Private Cloud", pausable: true, budget: 0 });
     expect(r.fallback).toMatchObject({ shortcut: "Local Agent", label: "on-device", pausable: false, budget: 7000 });
   });
 
@@ -51,7 +51,7 @@ describe("Apple routing (unchanged behavior)", () => {
 describe("ChatGPT routing", () => {
   it("runs the ChatGPT Shortcut with its own budget and no fallback by default", () => {
     const r = PROVIDERS.chatgpt.route(S({ provider: "chatgpt" }), 0, 0);
-    expect(r.primary).toMatchObject({ shortcut: "ChatGPT Agent", label: "ChatGPT", budget: 30000, pausable: false });
+    expect(r.primary).toMatchObject({ shortcut: "ChatGPT Agent", label: "ChatGPT", budget: 0, pausable: false });
     expect(r.fallback).toBeUndefined();
   });
 

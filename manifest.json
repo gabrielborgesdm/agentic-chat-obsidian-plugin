@@ -1,7 +1,7 @@
 {
   "id": "local-agent",
   "name": "Local Agent",
-  "version": "0.3.0",
+  "version": "0.3.10",
   "minAppVersion": "1.5.0",
   "description": "Chat agent for your vault, powered by Apple Intelligence or ChatGPT through iOS Shortcuts.",
   "author": "Gabe",

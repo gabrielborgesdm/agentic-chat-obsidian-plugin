@@ -3,7 +3,8 @@ import type { VaultService } from "../vault/VaultService";
 import { lineDiff } from "../vault/diff";
 import { uid } from "../storage/ConversationStore";
 
-const READ_CAP = 3000;
+/** Sanity ceiling only: the prompt builder shortens results to fit the active model's budget. */
+const READ_CAP = 200_000;
 
 function str(args: Record<string, unknown>, key: string, opts: { optional?: boolean } = {}): string {
   const v = args[key];
@@ -106,7 +107,7 @@ export function buildTools(vault: VaultService): ToolDef[] {
       async run(a) {
         const p = str(a, "path", { optional: true });
         const st = (str(a, "status", { optional: true }) || "open") as "open" | "done" | "all";
-        const t = await vault.listTasks(p || undefined, st);
+        const t = await vault.listTasks(p || undefined, st, 500);
         if (!t.length) return ok("No tasks found.");
         return ok(t.map((x) => `${x.path}:${x.line} [${x.done ? "x" : " "}] ${x.text}`).join("\n"));
       },

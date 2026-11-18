@@ -31,7 +31,8 @@ export interface AgentDeps {
   /** builds the prompt for the current scratch state */
   buildPrompt(scratch: ScratchEntry[], note: string | undefined, tier: Tier): string | Promise<string>;
   /** ask the user; resolves true to run */
-  approve(call: ToolCall, tool: ToolDef, preview: string): Promise<boolean>;
+  /** false = rejected; true = approved as is; { arguments } = approved with the user's changes (e.g. another folder). */
+  approve(call: ToolCall, tool: ToolDef, preview: string): Promise<boolean | { arguments: Record<string, unknown> }>;
   onEvent(e: AgentEvent): void;
   /** called right before each model request so state can survive an app kill */
   persistPending?(scratch: ScratchEntry[], step: number): void | Promise<void>;
@@ -84,7 +85,8 @@ export class AgentLoop {
     let claimRepaired = false;
     let tier: Tier = "primary";
     let note: string | undefined;
-    const max = Math.max(1, d.settings.maxSteps);
+    // 0 = no step limit (the Stop button still ends a request)
+    const max = d.settings.maxSteps > 0 ? d.settings.maxSteps : Infinity;
 
     for (let step = opts.startStep ?? 0; step < max; step++) {
       if (opts.signal?.aborted) throw new BridgeError("cancelled", "Cancelled");
@@ -194,11 +196,13 @@ export class AgentLoop {
         const preview = tool.preview
           ? await tool.preview(call.arguments, d.toolCtx)
           : JSON.stringify(call.arguments, null, 2);
-        const ok = await d.approve(call, tool, preview);
-        if (!ok) {
+        const decision = await d.approve(call, tool, preview);
+        if (!decision) {
           d.onEvent({ kind: "tool_rejected", call });
           return "The user REJECTED this action. Do not retry it; tell the user it was not done.";
         }
+        // The user changed something (e.g. picked another folder): run and report what they chose.
+        if (typeof decision === "object") call.arguments = decision.arguments;
       }
       d.onEvent({ kind: "tool_start", call });
       const res = await tool.run(call.arguments, d.toolCtx);

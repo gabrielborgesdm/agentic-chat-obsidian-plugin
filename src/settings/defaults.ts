@@ -1,3 +1,5 @@
+import type { ThemeId, ThemeMode } from "../ui/themes";
+
 export type ModelMode = "cloud" | "local";
 export type ProviderId = "apple" | "chatgpt";
 
@@ -19,6 +21,7 @@ export interface AgentSettings {
   shortcutName: string;
   /** Shortcut running "Use Model → Private Cloud Compute" */
   cloudShortcutName: string;
+  /** model calls per request; 0 = no limit */
   maxSteps: number;
   timeoutSec: number;
   autoCreate: boolean;
@@ -39,19 +42,28 @@ export interface AgentSettings {
   /** prompt budget in characters for Private Cloud Compute (much larger context) */
   cloudPromptCharBudget: number;
   autoRetrieve: boolean;
+  /** chat colors: "obsidian" uses the vault's own theme */
+  theme: ThemeId;
+  /** light/dark for the chat theme: auto = follow the device */
+  themeMode: ThemeMode;
+  /** mobile: hide Obsidian's floating bottom bar while the chat is in front */
+  hideMobileNavbar: boolean;
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = {
+  theme: "obsidian",
+  themeMode: "auto",
+  hideMobileNavbar: true,
   provider: "apple",
   chatgptShortcutName: "ChatGPT Agent",
-  chatgptPromptCharBudget: 30000,
+  chatgptPromptCharBudget: 0,
   chatgptFallback: false,
   modelMode: "cloud",
   shortcutName: "Local Agent",
   cloudShortcutName: "Cloud Agent",
-  maxSteps: 4,
+  maxSteps: 0,
   timeoutSec: 120,
-  autoCreate: true,
+  autoCreate: false,
   autoAppend: true,
   autoEdit: false,
   autoRename: false,
@@ -60,6 +72,6 @@ export const DEFAULT_SETTINGS: AgentSettings = {
   autoSpeak: false,
   customInstructions: "",
   promptCharBudget: 7000,
-  cloudPromptCharBudget: 16000,
+  cloudPromptCharBudget: 0,
   autoRetrieve: true,
 };

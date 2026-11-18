@@ -1,4 +1,4 @@
-import { Notice, Platform, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { Notice, Platform, Plugin, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { AgentLoop, type AgentEvent } from "./ai/AgentLoop";
 import { MockBridge } from "./ai/MockBridge";
 import { buildPrompt } from "./ai/PromptBuilder";
@@ -6,15 +6,18 @@ import { detectFastPath } from "./ai/FastPath";
 import { formatToolOutput, parseSlash } from "./ai/SlashCommands";
 import { ShortcutBridge } from "./ai/ShortcutBridge";
 import { AgentSettingsTab } from "./settings/SettingsTab";
-import { DEFAULT_SETTINGS, type AgentSettings } from "./settings/defaults";
+import { DEFAULT_SETTINGS, type AgentSettings, type ProviderId } from "./settings/defaults";
 import { providerOf, sanitizeSettings, type Route, type RouteTier } from "./providers/providers";
 import { ConversationStore } from "./storage/ConversationStore";
+import { buildReport } from "./storage/Report";
+import { Trace, type ModelTrace } from "./storage/Trace";
 import { rollbackOperation } from "./storage/OperationLog";
 import { buildTools, toolMap } from "./tools/registry";
 import { BridgeError, type Attachment, type ToolCall, type Conversation, type ModelBridge, type ScratchEntry, type ToolDef } from "./types";
 import { ChatView, VIEW_TYPE } from "./ui/ChatView";
 import { DiagnosticsModal } from "./ui/DiagnosticsModal";
 import { askApproval } from "./ui/ToolApproval";
+import { askCreateLocation } from "./ui/CreateNoteModal";
 import { buildContext } from "./vault/ContextBuilder";
 import { speak, stopSpeaking } from "./voice/Voice";
 import { VaultService } from "./vault/VaultService";
@@ -31,6 +34,7 @@ const today = () => {
 export default class LocalAgentPlugin extends Plugin {
   settings: AgentSettings = { ...DEFAULT_SETTINGS };
   store!: ConversationStore;
+  trace!: Trace;
   vault2!: VaultService;
   shortcut: ShortcutBridge | null = null;
   private bridge!: ModelBridge;
@@ -53,6 +57,13 @@ export default class LocalAgentPlugin extends Plugin {
       write: (s) => adapter.write(file, s),
     });
     await this.store.load();
+
+    const traceFile = `${dir}/trace.json`;
+    this.trace = new Trace({
+      read: async () => ((await adapter.exists(traceFile)) ? adapter.read(traceFile) : null),
+      write: (s) => adapter.write(traceFile, s),
+    });
+    await this.trace.load();
 
     this.vault2 = new VaultService(this.app);
     this.tools = buildTools(this.vault2);
@@ -93,6 +104,12 @@ export default class LocalAgentPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE, (leaf) => new ChatView(leaf, this));
     this.addRibbonIcon("message-circle", "Open Local Agent", () => void this.activateView());
+    this.registerMenus();
+
+    // Hide Obsidian's floating mobile bar while the chat is the active screen.
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.syncMobileChrome()));
+    this.registerEvent(this.app.workspace.on("layout-change", () => this.syncMobileChrome()));
+    this.app.workspace.onLayoutReady(() => this.syncMobileChrome());
     this.addSettingTab(new AgentSettingsTab(this.app, this));
 
     this.addCommand({ id: "open", name: "Open chat", callback: () => void this.activateView() });
@@ -114,6 +131,7 @@ export default class LocalAgentPlugin extends Plugin {
         new Notice(`Next request will use "${this.settings.cloudShortcutName}".`);
       },
     });
+    this.addCommand({ id: "copy-report", name: "Copy chat report (for debugging)", callback: () => void this.copyReport() });
     this.addCommand({
       id: "test-bridge",
       name: "Test provider (Shortcut round trip)",
@@ -132,11 +150,72 @@ export default class LocalAgentPlugin extends Plugin {
     stopSpeaking();
     this.shortcut?.destroy();
     void this.store.flush();
+    void this.trace?.flush();
+    document.body.removeClass("la-chat-focus");
   }
 
   async saveSettings(): Promise<void> {
     this.cloudPausedUntil = 0; // e.g. the cloud shortcut name was just fixed: try it again
     await this.saveData(this.settings);
+  }
+
+  /** The current chat as Markdown: messages, settings, and every prompt/raw reply/tool result recorded for it. */
+  buildChatReport(): string {
+    const conv = this.store.active();
+    const r = this.modelRoute();
+    const tier = (t: RouteTier) => `"${t.shortcut}" (budget ${t.budget > 0 ? t.budget : "none"})`;
+    return buildReport({
+      version: this.manifest.version,
+      platform: Platform.isIosApp ? "iOS" : Platform.isAndroidApp ? "Android" : Platform.isMobile ? "mobile" : "desktop (mock model)",
+      settings: this.settings,
+      route: tier(r.primary) + (r.fallback ? ` → fallback ${tier(r.fallback)}` : ""),
+      conv,
+      trace: this.trace.forConversation(conv.id, conv.messages[0]?.ts ?? conv.created),
+      now: new Date(),
+    });
+  }
+
+  /** Copies the report. Built synchronously so iOS still counts the tap as the clipboard gesture. */
+  async copyReport(): Promise<void> {
+    const text = this.buildChatReport();
+    try {
+      await navigator.clipboard.writeText(text);
+      new Notice(`Chat report copied (${Math.ceil(text.length / 1024)} KB).`);
+    } catch (e: any) {
+      new Notice("Could not copy the report: " + (e?.message ?? e), 6000);
+    }
+  }
+
+  /** Runs the selected provider's Shortcut once with a known prompt (PONG round trip). */
+  async testProvider(): Promise<{ ok: boolean; text: string }> {
+    const sc = this.shortcut;
+    if (!sc) return { ok: false, text: "The test needs the iPhone: on desktop the plugin uses a mock model." };
+    const name = providerOf(this.settings).testShortcut(this.settings);
+    const t0 = Date.now();
+    try {
+      const r = await sc.run(name, "Reply with exactly the single word: PONG");
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      return /pong/i.test(r.result)
+        ? { ok: true, text: `✅ “${name}” works (${secs}s).` }
+        : { ok: false, text: `⚠️ “${name}” answered, but not as expected: ${r.result.slice(0, 80).replace(/\n/g, " ")}. Check the last steps.` };
+    } catch (e: any) {
+      return { ok: false, text: `❌ “${name}” failed: ${e?.message ?? e}` };
+    }
+  }
+
+  /** Changes the chat theme or its light/dark mode and refreshes open views. */
+  async setAppearance(change: Partial<Pick<AgentSettings, "theme" | "themeMode">>): Promise<void> {
+    Object.assign(this.settings, change);
+    await this.saveSettings();
+    this.emit();
+  }
+
+  /** Switches the provider from the chat and refreshes open views. */
+  async setProvider(id: ProviderId): Promise<void> {
+    if (this.settings.provider === id) return;
+    this.settings.provider = id;
+    await this.saveSettings();
+    this.emit();
   }
 
   /** Opens the bridge test for the selected provider. */
@@ -202,19 +281,94 @@ export default class LocalAgentPlugin extends Plugin {
   }
 
   private async openFromLink(p: Record<string, string>): Promise<void> {
-    if (p.new === "1" && !this.busy) this.store.create();
+    await this.openChat({ fresh: p.new === "1", text: p.q, send: p.send === "1" });
+  }
+
+  /**
+   * Opens the chat, optionally on a fresh conversation, about a note ("this note"),
+   * with text in the input box, or sending it right away.
+   */
+  async openChat(o: { fresh?: boolean; note?: string; text?: string; send?: boolean } = {}): Promise<void> {
+    if (o.fresh && !this.busy) this.store.create();
+    if (o.note) this.pinNote(o.note);
     await this.activateView();
-    const q = (p.q ?? "").trim();
+    const q = (o.text ?? "").trim() ? (o.text as string) : "";
     if (!q) {
       this.emit();
       return;
     }
-    if (p.send === "1" && !this.busy) {
-      await this.send(q);
+    if (o.send && !this.busy) {
+      await this.send(q.trim());
     } else {
       const view = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
       if (view instanceof ChatView) view.setDraft(q);
     }
+  }
+
+  /** Adds/removes the body class that hides Obsidian's mobile bottom bar while the chat is in front. */
+  syncMobileChrome(): void {
+    const on = Platform.isMobile && this.settings.hideMobileNavbar && !!this.app.workspace.getActiveViewOfType(ChatView);
+    document.body.toggleClass("la-chat-focus", on);
+  }
+
+  /** Local Agent entries in Obsidian's note, folder and editor menus. */
+  private registerMenus(): void {
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (file instanceof TFile && file.extension === "md") {
+          menu.addItem((i) =>
+            i
+              .setSection("action")
+              .setTitle("Chat about this note")
+              .setIcon("message-circle")
+              .onClick(() => void this.openChat({ fresh: true, note: file.path }))
+          );
+          menu.addItem((i) =>
+            i
+              .setSection("action")
+              .setTitle("Summarize with Local Agent")
+              .setIcon("sparkles")
+              .onClick(() => void this.openChat({ fresh: true, note: file.path, text: "Summarize this note", send: true }))
+          );
+        } else if (file instanceof TFolder) {
+          const where = file.isRoot() ? "the vault root" : file.path;
+          menu.addItem((i) =>
+            i
+              .setSection("action")
+              .setTitle("New note here with Local Agent")
+              .setIcon("file-plus")
+              .onClick(() => void this.openChat({ fresh: true, text: `Create a note in ${where} about ` }))
+          );
+        }
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor, info) => {
+        const sel = editor.getSelection().trim();
+        const path = info.file?.path;
+        if (sel) {
+          const quoted = sel
+            .split("\n")
+            .map((l) => "> " + l)
+            .join("\n");
+          menu.addItem((i) =>
+            i
+              .setSection("selection")
+              .setTitle("Ask Local Agent about selection")
+              .setIcon("message-circle")
+              .onClick(() => void this.openChat({ note: path, text: `${quoted}\n\n` }))
+          );
+        } else {
+          menu.addItem((i) =>
+            i
+              .setSection("action")
+              .setTitle("Chat about this note")
+              .setIcon("message-circle")
+              .onClick(() => void this.openChat({ note: path }))
+          );
+        }
+      })
+    );
   }
 
   // ---------- model routing ----------
@@ -431,9 +585,29 @@ export default class LocalAgentPlugin extends Plugin {
       }
       if (excerpts.length) context = excerpts.join("\n\n") + (context ? "\n\n" + context : "");
       const route = this.modelRoute();
+      // Record every model call (prompt + raw reply) for the chat report.
+      let step = resume?.step ?? 0;
+      const traced = (t: RouteTier & { bridge: ModelBridge }, tier: "primary" | "fallback"): ModelBridge => ({
+        ask: async (prompt, signal) => {
+          const t0 = Date.now();
+          const entry = this.trace.add<ModelTrace>({ kind: "model", convId: conv.id, ts: t0, step, tier, shortcut: t.shortcut, prompt });
+          // Write now: iOS may suspend Obsidian as soon as the Shortcuts app opens.
+          await this.trace.flush();
+          try {
+            entry.reply = await t.bridge.ask(prompt, signal);
+            return entry.reply;
+          } catch (e: any) {
+            entry.error = `${e instanceof BridgeError ? e.kind : "error"}: ${e?.message ?? e}`;
+            throw e;
+          } finally {
+            entry.ms = Date.now() - t0;
+            this.trace.changed();
+          }
+        },
+      });
       const agent = new AgentLoop({
-        bridge: route.primary.bridge,
-        fallbackBridge: route.fallback?.bridge,
+        bridge: traced(route.primary, "primary"),
+        fallbackBridge: route.fallback && traced(route.fallback, "fallback"),
         tools: toolMap(this.tools),
         settings: this.settings,
         toolCtx: { currentPath: this.currentPath },
@@ -451,19 +625,33 @@ export default class LocalAgentPlugin extends Plugin {
             note,
             today: today(),
           }),
-        approve: (_call, tool, preview) => {
+        approve: async (call, tool, preview) => {
           this.statusLabel = "Waiting for your approval…";
           this.emit();
+          if (tool.name === "create_note") {
+            const proposed = typeof call.arguments.path === "string" ? call.arguments.path : "Untitled.md";
+            const content = typeof call.arguments.content === "string" ? call.arguments.content : "";
+            const name = (proposed.split("/").pop() ?? "").replace(/\.md$/i, "");
+            const path = await askCreateLocation(this.app, {
+              path: proposed,
+              content,
+              suggestions: await this.vault2.suggestFolders(`${name} ${content}`).catch(() => []),
+              folders: this.vault2.allFolders(),
+            });
+            return path ? { arguments: { ...call.arguments, path } } : false;
+          }
           return askApproval(this.app, tool.permission, tool.name, preview);
         },
         onEvent: (e) => {
           if (e.kind === "thinking") {
+            step = e.step;
             const label = (e.tier === "primary" ? route.primary : route.fallback ?? route.primary).label;
             this.statusLabel = `Thinking${e.step ? ` (step ${e.step + 1})` : ""} · ${label}…`;
             this.emit();
             return;
           }
           if (e.kind === "fallback") {
+            this.trace.add({ kind: "event", convId: conv.id, ts: Date.now(), text: `Fell back from "${route.primary.shortcut}": ${e.reason}` });
             // Don't keep bouncing to a cloud model that just failed (offline, missing shortcut...).
             if (route.primary.pausable) {
               this.cloudPausedUntil = Date.now() + CLOUD_PAUSE_MS;
@@ -511,6 +699,7 @@ export default class LocalAgentPlugin extends Plugin {
             : e?.message ?? String(e);
       // A missing or broken Shortcut shows up as a timeout, an error or an empty reply: offer the setup help.
       const needsSetup = e instanceof BridgeError && kind !== "cancelled";
+      this.trace.add({ kind: "event", convId: conv.id, ts: Date.now(), text: `Request ended with ${kind}: ${e?.message ?? e}` });
       this.store.add(conv, { role: "error", text, ...(needsSetup ? { setupProvider: provider.id } : {}) });
     } finally {
       this.busy = false;
@@ -528,6 +717,15 @@ export default class LocalAgentPlugin extends Plugin {
         break;
       case "tool_end": {
         if (e.op) this.store.addOp(e.op);
+        this.trace.add({
+          kind: "tool",
+          convId: conv.id,
+          ts: Date.now(),
+          tool: e.call.name,
+          args: e.call.arguments,
+          ok: e.ok,
+          output: e.output.length > 20000 ? e.output.slice(0, 20000) + `\n… (${e.output.length - 20000} more characters not kept)` : e.output,
+        });
         const first = Object.values(e.call.arguments).find((v) => typeof v === "string") as string | undefined;
         const arg = first ? `(${first.replace(/\s+/g, " ").slice(0, 40)}${first.length > 40 ? "…" : ""})` : "()";
         const detail = e.ok ? "" : ` — ${e.output.slice(0, 120)}`;
@@ -539,6 +737,7 @@ export default class LocalAgentPlugin extends Plugin {
         break;
       }
       case "tool_rejected":
+        this.trace.add({ kind: "event", convId: conv.id, ts: Date.now(), text: `You rejected ${e.call.name} ${JSON.stringify(e.call.arguments)}` });
         this.store.add(conv, {
           role: "tool",
           text: `${e.call.name}: rejected by you`,
@@ -558,6 +757,14 @@ export default class LocalAgentPlugin extends Plugin {
     if (info.status !== "success" || !info.result.trim() || !conv || Date.now() - p.ts > 60 * 60 * 1000) {
       await this.store.setPending(null);
       return;
+    }
+    // The app was killed while waiting: attach the late reply to the call it belongs to.
+    const waiting = this.trace.pendingModel(conv.id);
+    if (waiting) {
+      waiting.reply = info.result;
+      waiting.resumed = true;
+      waiting.ms = Date.now() - waiting.ts;
+      this.trace.changed();
     }
     new Notice("Local Agent: resuming your request…");
     void this.activateView();

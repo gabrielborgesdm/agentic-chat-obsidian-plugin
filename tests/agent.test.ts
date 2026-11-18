@@ -31,7 +31,7 @@ function scripted(replies: (string | Error)[], prompts: string[] = []): ModelBri
 function make(
   bridge: ModelBridge,
   tools: ToolDef[],
-  opts: { approve?: boolean; settings?: Partial<typeof DEFAULT_SETTINGS>; events?: AgentEvent[] } = {}
+  opts: { approve?: boolean | { arguments: Record<string, unknown> }; settings?: Partial<typeof DEFAULT_SETTINGS>; events?: AgentEvent[] } = {}
 ) {
   const settings = { ...DEFAULT_SETTINGS, ...opts.settings };
   const approvals: string[] = [];
@@ -110,6 +110,17 @@ describe("AgentLoop", () => {
     expect(log).toEqual([]);
   });
 
+  it("creates the note where the user moved it in the approval dialog", async () => {
+    const log: string[] = [];
+    const { agent } = make(
+      scripted([call("create_note", { path: "Malas.md", content: "x" }), final("ok")]),
+      [tool("create_note", "create", log)],
+      { approve: { arguments: { path: "Viagens/Malas.md", content: "x" } } }
+    );
+    await agent.run();
+    expect(log).toEqual(['create_note:{"path":"Viagens/Malas.md","content":"x"}']);
+  });
+
   it("runs approved edits", async () => {
     const log: string[] = [];
     const { agent } = make(scripted([call("update_note"), final("ok")]), [tool("update_note", "edit", log)], { approve: true });
@@ -117,12 +128,12 @@ describe("AgentLoop", () => {
     expect(log).toHaveLength(1);
   });
 
-  it("does not ask for read/create/append by default, but does when configured", async () => {
+  it("asks where to create by default, not for read/append, and follows the settings", async () => {
     const t = (p: Permission) => tool("t", p, []);
     expect(needsApproval(t("read"), DEFAULT_SETTINGS)).toBe(false);
-    expect(needsApproval(t("create"), DEFAULT_SETTINGS)).toBe(false);
+    expect(needsApproval(t("create"), DEFAULT_SETTINGS)).toBe(true);
     expect(needsApproval(t("append"), DEFAULT_SETTINGS)).toBe(false);
-    expect(needsApproval(t("create"), { ...DEFAULT_SETTINGS, autoCreate: false })).toBe(true);
+    expect(needsApproval(t("create"), { ...DEFAULT_SETTINGS, autoCreate: true })).toBe(false);
     expect(needsApproval(t("append"), { ...DEFAULT_SETTINGS, autoAppend: false })).toBe(true);
     expect(needsApproval(t("delete"), DEFAULT_SETTINGS)).toBe(true);
     expect(needsApproval(t("rename"), DEFAULT_SETTINGS)).toBe(true);
@@ -181,6 +192,30 @@ describe("buildPrompt", () => {
       scratch: [{ call: { name: "read_note", arguments: { path: "a.md" } }, result: "CONTENT-XYZ" }],
     });
     expect(p).toContain("CONTENT-XYZ");
+  });
+  const longNote = "# Viagem/checklist.md\n" + "a".repeat(10000) + "ROUPAS-AT-THE-END";
+  const readScratch = [{ call: { name: "read_note", arguments: { path: "Viagem/checklist.md" } }, result: longNote }];
+  it("sends a whole long note when the budget is 0 (no limit)", () => {
+    const p = buildPrompt({
+      ...base,
+      settings: { ...DEFAULT_SETTINGS, promptCharBudget: 0 },
+      history: [{ id: "1", ts: 1, role: "user", text: "q" }],
+      scratch: readScratch,
+    });
+    expect(p).toContain("ROUPAS-AT-THE-END");
+  });
+  it("tells the model where to continue when a note is cut to fit a budget", () => {
+    const p = buildPrompt({
+      ...base,
+      settings: { ...DEFAULT_SETTINGS, promptCharBudget: 7000 },
+      history: [{ id: "1", ts: 1, role: "user", text: "q" }],
+      scratch: readScratch,
+    });
+    expect(p).not.toContain("ROUPAS-AT-THE-END");
+    const m = p.match(/Call read_note with offset=(\d+)/);
+    expect(m).not.toBeNull();
+    const shownAs = p.slice(p.indexOf("# Viagem/checklist.md\n") + "# Viagem/checklist.md\n".length).match(/^a+/)![0].length;
+    expect(Number(m![1])).toBe(shownAs);
   });
 });
 

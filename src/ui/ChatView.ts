@@ -1,9 +1,12 @@
 import { ItemView, MarkdownRenderer, Menu, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type LocalAgentPlugin from "../main";
 import type { Attachment, ChatMessage } from "../types";
+import type { ProviderId } from "../settings/defaults";
 import { ConversationPicker } from "./ConversationPicker";
 import { NotePicker } from "./NotePicker";
 import { PROVIDERS, providerOf } from "../providers/providers";
+import { MODES, THEMES, applyTheme } from "./themes";
+import { openImageViewer } from "./ImageViewer";
 import { canSpeak, isSpeaking, speak, stopSpeaking } from "../voice/Voice";
 
 export const VIEW_TYPE = "local-agent-chat";
@@ -14,7 +17,7 @@ export class ChatView extends ItemView {
   private inputEl!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
   private strip!: HTMLElement;
-  private ctxBar!: HTMLElement;
+  private optionsBtn!: HTMLElement;
   private fileInput!: HTMLInputElement;
   private pending: Attachment[] = [];
   private titleEl2!: HTMLElement;
@@ -43,11 +46,14 @@ export class ChatView extends ItemView {
     const header = root.createDiv("la-header");
     this.titleEl2 = header.createDiv({ cls: "la-title", text: "Local Agent" });
     const actions = header.createDiv("la-actions");
-    const mk = (icon: string, label: string, fn: () => void) => {
+    const mk = (icon: string, label: string, fn: (e: MouseEvent) => void) => {
       const b = actions.createEl("button", { cls: "la-icon-btn clickable-icon", attr: { "aria-label": label } });
       setIcon(b, icon);
       b.addEventListener("click", fn);
+      return b;
     };
+    // note, provider, report and settings live here instead of a row above the input
+    this.optionsBtn = mk("sliders-horizontal", "Chat options", (e) => this.optionsMenu(e));
     mk("history", "Conversations", () =>
       new ConversationPicker(this.app, this.plugin.store.list(), (c) => {
         this.plugin.store.setActive(c.id);
@@ -65,14 +71,20 @@ export class ChatView extends ItemView {
 
     this.listEl = root.createDiv("la-messages");
     this.listEl.addEventListener("click", (e) => {
-      const a = (e.target as HTMLElement).closest("a.internal-link") as HTMLAnchorElement | null;
+      const target = e.target as HTMLElement;
+      if (target instanceof HTMLImageElement && target.closest(".la-bubble")) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.viewImage(target);
+        return;
+      }
+      const a = target.closest("a.internal-link") as HTMLAnchorElement | null;
       if (a) {
         e.preventDefault();
         void this.app.workspace.openLinkText(a.getAttribute("data-href") ?? a.getAttribute("href") ?? "", "", false);
       }
     });
 
-    this.ctxBar = root.createDiv("la-ctx");
     this.strip = root.createDiv("la-attach-strip");
     const composer = root.createDiv("la-composer");
 
@@ -82,9 +94,20 @@ export class ChatView extends ItemView {
       this.fileInput.value = "";
       void this.addFiles(files);
     });
-    const attachBtn = composer.createEl("button", { cls: "la-mic clickable-icon", attr: { "aria-label": "Attach files or photos" } });
+    const attachBtn = composer.createEl("button", { cls: "la-mic clickable-icon", attr: { "aria-label": "Attach a note, photo or file" } });
     setIcon(attachBtn, "paperclip");
-    attachBtn.addEventListener("click", () => this.fileInput.click());
+    attachBtn.addEventListener("click", (e) => {
+      const menu = new Menu();
+      menu.addItem((i) =>
+        i
+          .setTitle("Note from your vault…")
+          .setIcon("file-text")
+          .onClick(() => new NotePicker(this.app, (f) => this.plugin.pinNote(f.path)).open())
+      );
+      // the file picker must open inside the tap itself, or iOS blocks it
+      menu.addItem((i) => i.setTitle("Photo or file…").setIcon("image").onClick(() => this.fileInput.click()));
+      menu.showAtMouseEvent(e);
+    });
 
     this.inputEl = composer.createEl("textarea", {
       cls: "la-input",
@@ -108,7 +131,64 @@ export class ChatView extends ItemView {
     this.sendBtn.addEventListener("click", () => (this.plugin.busy ? this.plugin.stop() : this.submit()));
 
     this.unsubs.push(this.plugin.onChange(() => this.render()));
+    // Auto / Match Obsidian modes: re-apply when the device or Obsidian switches light/dark.
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (mq) {
+      const onScheme = () => this.applyTheme();
+      mq.addEventListener("change", onScheme);
+      this.unsubs.push(() => mq.removeEventListener("change", onScheme));
+    }
+    this.registerEvent(this.app.workspace.on("css-change", () => this.applyTheme()));
     this.render();
+  }
+
+  /** Opens an image from a bubble (attachment or ![[embed]] in an answer) in the full-screen viewer. */
+  private viewImage(img: HTMLImageElement): void {
+    if (img.closest(".la-selecting")) return;
+    // attachments carry data-path; Markdown embeds sit in a span.internal-embed with src="<link>"
+    const link = img.dataset.path ?? img.closest(".internal-embed")?.getAttribute("src") ?? "";
+    const file =
+      (link && (this.app.vault.getAbstractFileByPath(link) ?? this.app.metadataCache.getFirstLinkpathDest(link.split("|")[0], ""))) || null;
+    const tfile = file instanceof TFile ? file : undefined;
+    openImageViewer(this.app, {
+      src: img.currentSrc || img.src,
+      name: tfile?.name ?? img.alt ?? "Image",
+      file: tfile,
+    });
+  }
+
+  private applyTheme(): void {
+    applyTheme(this.contentEl, this.plugin.settings.theme, this.plugin.settings.themeMode);
+  }
+
+  /** The view's ⋯ menu: theme and light/dark choices. */
+  onPaneMenu(menu: Menu, source: string): void {
+    super.onPaneMenu(menu, source);
+    const s = this.plugin.settings;
+    menu.addSeparator();
+    menu.addItem((i) => i.setTitle("Copy chat report").setIcon("clipboard-copy").onClick(() => void this.plugin.copyReport()));
+    menu.addSeparator();
+    for (const t of THEMES) {
+      menu.addItem((i) =>
+        i
+          .setTitle(`Theme: ${t.label}`)
+          .setIcon("palette")
+          .setChecked(s.theme === t.id)
+          .onClick(() => void this.plugin.setAppearance({ theme: t.id }))
+      );
+    }
+    if (s.theme !== "obsidian") {
+      menu.addSeparator();
+      for (const m of MODES) {
+        menu.addItem((i) =>
+          i
+            .setTitle(m.label)
+            .setIcon(m.id === "dark" ? "moon" : m.id === "light" ? "sun" : "sun-moon")
+            .setChecked(s.themeMode === m.id)
+            .onClick(() => void this.plugin.setAppearance({ themeMode: m.id }))
+        );
+      }
+    }
   }
 
   async onClose(): Promise<void> {
@@ -150,6 +230,16 @@ export class ChatView extends ItemView {
 
   private renderStrip(): void {
     this.strip.empty();
+    // a note chosen with 📎 → "Note from your vault" shows as a chip, like an attachment
+    const pinned = this.plugin.noteIsPinned ? this.plugin.currentPath() : null;
+    if (pinned) {
+      const chip = this.strip.createDiv({ cls: "la-attach-chip la-note-chip", attr: { "aria-label": `"This note" = ${pinned}` } });
+      setIcon(chip.createSpan("la-tool-icon"), "file-text");
+      chip.createSpan({ text: (pinned.split("/").pop() ?? pinned).replace(/\.md$/, ""), cls: "la-attach-name" });
+      const x = chip.createEl("button", { cls: "la-attach-x clickable-icon", attr: { "aria-label": "Remove note" } });
+      setIcon(x, "x");
+      x.addEventListener("click", () => this.plugin.pinNote(null));
+    }
     this.pending.forEach((a, i) => {
       const chip = this.strip.createDiv("la-attach-chip");
       const icon = chip.createSpan("la-tool-icon");
@@ -166,34 +256,61 @@ export class ChatView extends ItemView {
 
   // ---------- "this note" pill ----------
 
+  /** Header options button: a dot shows a note is attached; a warning dot shows Private Cloud is paused. */
   private renderCtx(): void {
-    this.ctxBar.empty();
     const path = this.plugin.currentPath();
-    const pill = this.ctxBar.createDiv({ cls: "la-ctx-pill" + (path ? "" : " off") });
-    const icon = pill.createSpan("la-tool-icon");
-    setIcon(icon, path ? (this.plugin.noteIsPinned ? "pin" : "file-text") : "file-x");
-    pill.createSpan({
-      cls: "la-ctx-name",
-      text: path ? (path.split("/").pop() ?? path).replace(/\.md$/, "") : "No note — tap to choose",
-    });
-    pill.setAttr("aria-label", path ? `"This note" = ${path}. Tap to change.` : "Choose a note");
-    pill.addEventListener("click", () => new NotePicker(this.app, (f) => this.plugin.pinNote(f.path)).open());
+    const paused = this.plugin.cloudPauseInfo();
+    this.optionsBtn.toggleClass("la-has-note", !!path);
+    this.optionsBtn.toggleClass("la-has-warning", !!paused);
+    this.optionsBtn.setAttr(
+      "aria-label",
+      [`Chat options · ${providerOf(this.plugin.settings).label}`, path ? `this note: ${path}` : "no note", paused].filter(Boolean).join(" · ")
+    );
+  }
+
+  /** Everything that used to sit above the input: the note, the provider, Private Cloud, report, settings. */
+  private optionsMenu(e: MouseEvent): void {
+    const s = this.plugin.settings;
+    const path = this.plugin.currentPath();
+    const name = path ? (path.split("/").pop() ?? path).replace(/\.md$/, "") : "";
+    const menu = new Menu();
+
+    // choosing a note lives in 📎; here only what's in use, and a way to turn it off
     if (path) {
-      const x = this.ctxBar.createEl("button", { cls: "la-ctx-x clickable-icon", attr: { "aria-label": "Don't use a note" } });
-      setIcon(x, "x");
-      x.addEventListener("click", () => this.plugin.detachNote());
+      menu.addItem((i) => i.setTitle(`This note: ${name}`).setIcon(this.plugin.noteIsPinned ? "pin" : "file-text").setDisabled(true));
+      menu.addItem((i) => i.setTitle("Don't use a note").setIcon("file-x").onClick(() => this.plugin.detachNote()));
+    } else {
+      menu.addItem((i) => i.setTitle("No note in use (📎 to attach one)").setIcon("file-x").setDisabled(true));
+    }
+
+    menu.addSeparator();
+    for (const p of Object.values(PROVIDERS)) {
+      menu.addItem((i) =>
+        i
+          .setTitle(p.label)
+          .setIcon("sparkles")
+          .setChecked(p.id === s.provider)
+          .setDisabled(this.plugin.busy)
+          .onClick(() => void this.plugin.setProvider(p.id))
+      );
     }
     const paused = this.plugin.cloudPauseInfo();
     if (paused) {
-      const warn = this.ctxBar.createDiv({ cls: "la-ctx-pill la-ctx-warn", attr: { "aria-label": paused + ". Tap to retry now." } });
-      const wi = warn.createSpan("la-tool-icon");
-      setIcon(wi, "cloud-off");
-      warn.createSpan({ cls: "la-ctx-name", text: "on-device · tap for Cloud" });
-      warn.addEventListener("click", () => {
-        new Notice(paused);
-        this.plugin.resumeCloud();
-      });
+      menu.addItem((i) =>
+        i
+          .setTitle("Use Private Cloud again")
+          .setIcon("cloud")
+          .onClick(() => {
+            new Notice(paused);
+            this.plugin.resumeCloud();
+          })
+      );
     }
+
+    menu.addSeparator();
+    menu.addItem((i) => i.setTitle("Copy chat report").setIcon("clipboard-copy").onClick(() => void this.plugin.copyReport()));
+    menu.addItem((i) => i.setTitle("Settings").setIcon("settings").onClick(() => this.plugin.openSettings()));
+    menu.showAtMouseEvent(e);
   }
 
   // ---------- long-press menu ----------
@@ -325,30 +442,12 @@ export class ChatView extends ItemView {
     if (!this.listEl) return;
     const conv = this.plugin.store.active();
     this.titleEl2.setText(conv.title);
+    this.applyTheme();
     this.listEl.empty();
     this.renderCtx();
+    this.renderStrip();
 
-    if (!conv.messages.length) {
-      const empty = this.listEl.createDiv("la-empty");
-      empty.createEl("h3", { text: "Local Agent" });
-      empty.createEl("p", { text: providerOf(this.plugin.settings).tagline });
-      const cur = this.plugin.currentPath();
-      const examples: [string, boolean][] = [
-        ...(cur ? ([["Summarize this note", true]] as [string, boolean][]) : []),
-        ["/tasks", true],
-        ["What did I write about travel?", true],
-        ["/add ", false],
-        ["/help", true],
-      ];
-      for (const [ex, send] of examples) {
-        const chip = empty.createEl("button", { cls: "la-suggestion", text: ex.trim() });
-        chip.addEventListener("click", () => {
-          if (send) void this.plugin.send(ex);
-          else this.setDraft(ex);
-        });
-      }
-      empty.createEl("p", { cls: "la-hint", text: "Press and hold a message for options." });
-    }
+    if (!conv.messages.length) this.renderWelcome();
 
     conv.messages.forEach((m, i) => this.renderMessage(m, i === conv.messages.length - 1));
 
@@ -365,6 +464,142 @@ export class ChatView extends ItemView {
     setIcon(this.sendBtn, this.plugin.busy ? "square" : "arrow-up");
     this.sendBtn.setAttr("aria-label", this.plugin.busy ? "Stop" : "Send");
     this.listEl.scrollTop = this.listEl.scrollHeight;
+  }
+
+  /** Start screen of an empty chat: greeting, suggestion cards and the instant commands. */
+  private renderWelcome(): void {
+    const s = this.plugin.settings;
+    const provider = providerOf(s);
+    const cur = this.plugin.currentPath();
+    const curName = cur ? (cur.split("/").pop() ?? cur).replace(/\.md$/, "") : "";
+    const hour = new Date().getHours();
+    const greeting = hour < 5 ? "Up late?" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+
+    const w = this.listEl.createDiv("la-welcome");
+    const hero = w.createDiv("la-welcome-hero");
+    setIcon(hero.createDiv("la-welcome-mark"), "sparkles");
+    hero.createDiv({ cls: "la-welcome-title", text: greeting });
+    hero.createDiv({ cls: "la-welcome-sub", text: "Ask about your notes, or tell me what to write, change or organize." });
+    const badge = hero.createDiv({ cls: "la-welcome-badge", attr: { "aria-label": "Change provider" } });
+    setIcon(badge.createSpan(), "cpu");
+    badge.createSpan({ text: provider.label });
+    badge.addEventListener("click", (e) => this.providerMenu(e));
+
+    // [icon, title, subtitle, text, send now?]
+    const cards: [string, string, string, string, boolean][] = [
+      ...(cur ? ([["file-text", "Summarize", curName, "Summarize this note", true]] as [string, string, string, string, boolean][]) : []),
+      ["list-checks", "Open tasks", "What's left to do", "What are my open tasks?", true],
+      ["search", "Find in notes", "What did I write about…", "What did I write about ", false],
+      ["file-plus", "New note", "I'll suggest the folder", "Create a note about ", false],
+      ...(cur ? ([["plus-circle", "Add to note", curName, "/add ", false]] as [string, string, string, string, boolean][]) : []),
+      ["calendar-days", "Daily note", "Capture to today", "/daily ", false],
+    ];
+    const grid = w.createDiv("la-welcome-grid");
+    for (const [icon, title, sub, text, send] of cards) {
+      const c = grid.createEl("button", { cls: "la-card" });
+      setIcon(c.createDiv("la-card-icon"), icon);
+      c.createDiv({ cls: "la-card-title", text: title });
+      c.createDiv({ cls: "la-card-sub", text: sub });
+      c.addEventListener("click", () => (send ? void this.plugin.send(text) : this.setDraft(text)));
+    }
+
+    const cmds = w.createEl("details", { cls: "la-welcome-cmds" });
+    const sum = cmds.createEl("summary");
+    setIcon(sum.createSpan("la-cmds-icon"), "zap");
+    sum.createSpan({ text: "Instant commands" });
+    sum.createSpan({ cls: "la-cmds-hint", text: "no AI, no app switch" });
+    const list: [string, string, boolean][] = [
+      ["/tasks", "open tasks (/tasks note for one note)", true],
+      ["/search ", "search the vault", false],
+      ["/read ", "show a note", false],
+      ["/add ", "add text to the current note", false],
+      ["/new ", "Folder/Title, then the text on a new line", false],
+      ["/daily ", "add to today's daily note", false],
+      ["/undo", "undo the last change", true],
+    ];
+    for (const [cmd, desc, send] of list) {
+      const row = cmds.createEl("button", { cls: "la-cmd-row" });
+      row.createSpan({ cls: "la-cmd", text: cmd.trim() });
+      row.createSpan({ cls: "la-cmd-desc", text: desc });
+      row.addEventListener("click", () => (send ? void this.plugin.send(cmd) : this.setDraft(cmd)));
+    }
+    w.createDiv({ cls: "la-hint", text: "Tip: press and hold any message for options." });
+  }
+
+  /** Provider choices (used by the provider pill and the welcome badge). */
+  private providerMenu(e: MouseEvent): void {
+    const s = this.plugin.settings;
+    const menu = new Menu();
+    for (const p of Object.values(PROVIDERS)) {
+      menu.addItem((i) =>
+        i
+          .setTitle(p.label)
+          .setChecked(p.id === s.provider)
+          .setDisabled(this.plugin.busy)
+          .onClick(() => void this.plugin.setProvider(p.id))
+      );
+    }
+    menu.addSeparator();
+    menu.addItem((i) => i.setTitle("Provider settings…").setIcon("settings").onClick(() => this.plugin.openSettings()));
+    menu.showAtMouseEvent(e);
+  }
+
+  /**
+   * Setup tutorial shown in the chat after a provider failure: the provider's steps with the
+   * configured Shortcut names, plus buttons to create the Shortcut, test it and retry.
+   */
+  private renderSetupGuide(providerId: ProviderId, errorText: string): void {
+    const s = this.plugin.settings;
+    const provider = PROVIDERS[providerId];
+    const help = provider.help(s);
+    const missing = /could not find the shortcut|not find.*shortcut|did not answer in time/i.test(errorText);
+    const name = provider.testShortcut(s);
+
+    const card = this.listEl.createDiv("la-setup");
+    const head = card.createDiv("la-setup-head");
+    const icon = head.createDiv("la-setup-icon");
+    setIcon(icon, "wrench");
+    const titles = head.createDiv();
+    titles.createDiv({ cls: "la-setup-title", text: missing ? `Set up “${name}”` : `Check your ${provider.label} Shortcut` });
+    titles.createDiv({
+      cls: "la-setup-sub",
+      text: missing
+        ? `${provider.label} answers through a Shortcut that doesn't exist yet. It takes about 2 minutes:`
+        : "If it keeps failing, compare your Shortcut with these steps:",
+    });
+
+    const body = card.createEl("details", { cls: "la-setup-steps" });
+    body.open = missing;
+    body.createEl("summary", { text: help.title });
+    for (const g of help.groups) {
+      if (g.heading) body.createDiv({ cls: "la-setup-group", text: g.heading });
+      const ol = body.createEl("ol");
+      for (const step of g.steps) ol.createEl("li", { text: step });
+    }
+    if (help.notes.length) {
+      const ul = body.createEl("ul", { cls: "la-setup-notes" });
+      for (const n of help.notes) ul.createEl("li", { text: n });
+    }
+
+    const status = card.createDiv({ cls: "la-setup-status" });
+    const actions = card.createDiv("la-setup-actions");
+    const btn = (label: string, iconId: string, fn: (b: HTMLButtonElement) => void, cta = false) => {
+      const b = actions.createEl("button", { cls: "la-setup-btn" + (cta ? " mod-cta" : "") });
+      setIcon(b.createSpan(), iconId);
+      b.createSpan({ text: label });
+      b.addEventListener("click", () => fn(b));
+    };
+    if (Platform.isIosApp) btn("Create Shortcut", "plus", () => window.open("shortcuts://create-shortcut"), missing);
+    btn("Test", "play", async (b) => {
+      b.disabled = true;
+      status.setText(`Running “${name}”…`);
+      const r = await this.plugin.testProvider();
+      status.setText(r.text);
+      status.toggleClass("ok", r.ok);
+      b.disabled = false;
+    });
+    btn("Retry", "rotate-ccw", () => void this.plugin.retry(), !missing);
+    btn("Settings", "settings", () => this.plugin.openSettings());
   }
 
   private renderMessage(m: ChatMessage, isLast: boolean): void {
@@ -388,8 +623,9 @@ export class ChatView extends ItemView {
       const b = row.createDiv("la-bubble la-error");
       b.createSpan({ text: m.text, cls: "la-text" });
       if (m.setupProvider && isLast && !this.plugin.busy) {
-        const setup = b.createEl("button", { cls: "la-retry", text: `Set up ${PROVIDERS[m.setupProvider].label}` });
-        setup.addEventListener("click", () => this.plugin.openSettings());
+        this.attachMenu(b, (menu) => this.messageMenu(menu, m, b, isLast));
+        this.renderSetupGuide(m.setupProvider, m.text);
+        return;
       }
       if (isLast && !this.plugin.busy) {
         const retry = b.createEl("button", { cls: "la-retry", text: "Retry" });
@@ -405,8 +641,8 @@ export class ChatView extends ItemView {
       for (const a of m.attachments) {
         const file = this.app.vault.getAbstractFileByPath(a.path);
         if (a.kind === "image" && file instanceof TFile) {
-          const img = wrap.createEl("img", { cls: "la-att-img", attr: { src: this.app.vault.getResourcePath(file), alt: a.name } });
-          img.addEventListener("click", () => void this.app.workspace.getLeaf("tab").openFile(file));
+          // opened in the image viewer by the click handler on the message list
+          wrap.createEl("img", { cls: "la-att-img", attr: { src: this.app.vault.getResourcePath(file), alt: a.name, "data-path": file.path } });
         } else {
           const chip = wrap.createDiv("la-attach-chip");
           const icon = chip.createSpan("la-tool-icon");

@@ -13,8 +13,8 @@ export async function buildContext(
   const parts: string[] = [];
   try {
     // lets the model pick a real folder instead of asking the user
-    const root = vault.listFiles("");
-    if (root.folders.length) parts.push("Vault folders: " + root.folders.map((f) => f.replace(/\/$/, "")).join(", "));
+    const folders = vault.allFolders();
+    if (folders.length) parts.push("Vault folders: " + folders.slice(0, 300).join(", "));
   } catch {
     /* ignore */
   }
@@ -48,15 +48,20 @@ export async function buildContext(
     // Task/checklist questions: prefetch open tasks, preferring files that matched the search.
     if (/checklist|check list|tarefa|\btasks?\b|to-?do|pendente|afazer|a fazer/i.test(userText)) {
       try {
-        const all = await vault.listTasks(undefined, "open", 200);
+        const all = await vault.listTasks(undefined, "open", 500);
         const hitPaths = new Set(hits.map((h) => h.path));
         const preferred = all.filter((t) => hitPaths.has(t.path));
-        const pick = (preferred.length ? preferred : all).slice(0, 10);
+        // generous: the prompt builder trims the context to fit a limited model
+        const pick = preferred.length ? preferred.slice(0, 250) : all.slice(0, 80);
         if (pick.length) {
           parts.push(
             "Open tasks found (path:line text):\n" +
-              pick.map((t) => `${t.path}:${t.line} ${t.text.slice(0, 110)}${t.text.length > 110 ? "…" : ""}`).join("\n") +
-              (all.length > pick.length ? `\n(${all.length - pick.length} more; use list_tasks with a path)` : "")
+              pick.map((t) => `${t.path}:${t.line} ${t.text.slice(0, 180)}${t.text.length > 180 ? "…" : ""}`).join("\n") +
+              (all.length > pick.length
+                ? preferred.length && pick.length === preferred.length
+                  ? `\n(These are ALL open tasks of the matching note. ${all.length - pick.length} more are in other notes.)`
+                  : `\n(${all.length - pick.length} more; call list_tasks with a path to get them)`
+                : "")
           );
         }
       } catch {

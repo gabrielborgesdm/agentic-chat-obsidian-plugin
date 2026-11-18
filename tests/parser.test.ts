@@ -89,3 +89,19 @@ describe("task list references", () => {
     expect(r.reply).toEqual({ type: "final", message: "{{tasks: Viagens/2026-11-travel/checklist.md}}\n\nAs tarefas estão acima." });
   });
 });
+
+describe("code answers", () => {
+  it("accepts a reply that is only a C code block (the real chat) without a repair call", () => {
+    const raw = '```c\n#include <stdio.h>\n\nint main() {\n    printf("216\n");\n    return 0;\n}\n```';
+    const r = parseReply(raw);
+    expect(r.malformed).toBe(false);
+    expect(r.reply).toEqual({ type: "final", message: raw });
+  });
+  it("still repairs a broken ```json reply", () => {
+    expect(parseReply('```json\n{"type":"final","message":"oops\n```').malformed).toBe(true);
+  });
+  it("keeps a final message that is a code block", () => {
+    const r = parseReply(JSON.stringify({ type: "final", message: "```python\nprint(216)\n```" }));
+    expect(r).toEqual({ reply: { type: "final", message: "```python\nprint(216)\n```" }, malformed: false });
+  });
+});

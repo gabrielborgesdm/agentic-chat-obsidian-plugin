@@ -113,12 +113,13 @@ export function parseReply(raw: string): ParsedReply {
   if (!text) return { reply: { type: "final", message: "" }, malformed: true };
   // "{{tasks: path}}" answers start with "{" but are plain text, not broken JSON (no repair round trip)
   if (/^\{\{\s*tasks?\s*:/i.test(text) && !/"type"\s*:/.test(text)) return { reply: { type: "final", message: text }, malformed: false };
-  const unfenced = text.replace(/```(?:json)?/gi, "").trim();
+  // only a fence around the whole reply is removed: code blocks inside the message stay intact
+  const unfenced = text.replace(/^```(?:json)?[ \t]*\n?/i, "").replace(/\n?```\s*$/, "").trim();
   const block = extractJsonObject(unfenced);
   if (block) {
     const reply = normalize(tryParse(block));
     if (reply) {
-      if (reply.type === "final" && /^\s*[{`]/.test(reply.message)) {
+      if (reply.type === "final" && looksLikeJsonText(reply.message)) {
         // The model nested JSON inside "message". Unwrap a real reply; a bare data object is malformed.
         const inner = extractJsonObject(reply.message.replace(/```(?:json)?/gi, ""));
         const innerReply = inner ? normalize(tryParse(inner)) : null;
@@ -128,6 +129,14 @@ export function parseReply(raw: string): ParsedReply {
       return { reply, malformed: false };
     }
   }
-  const looksLikeJson = /^\s*[{`]/.test(text) || /"type"\s*:/.test(text);
-  return { reply: { type: "final", message: text }, malformed: looksLikeJson };
+  return { reply: { type: "final", message: text }, malformed: looksLikeJsonText(text) };
+}
+
+/**
+ * A reply that tried to be the JSON protocol: starts with "{", or is a ```json block, or has
+ * a "type" key. A code block in another language (C, Python…) is a normal answer, not broken
+ * JSON: treating it as broken triggered a needless repair call to the model.
+ */
+function looksLikeJsonText(text: string): boolean {
+  return /^\s*\{/.test(text) || /^\s*```\s*json\b/i.test(text) || /"type"\s*:/.test(text);
 }

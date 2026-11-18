@@ -1,6 +1,6 @@
 {
   "name": "obsidian-local-agent",
-  "version": "0.3.29",
+  "version": "0.3.30",
   "private": true,
   "description": "Chat agent for your vault, powered by Apple Intelligence or ChatGPT through iOS Shortcuts.",
   "scripts": {

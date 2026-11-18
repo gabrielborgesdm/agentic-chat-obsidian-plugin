@@ -722,8 +722,10 @@ export class ChatView extends ItemView {
     const tasks = mayListTasks ? await this.plugin.allTasks().catch(() => []) : [];
     const expanded = mayListTasks ? expandTaskEmbeds(text, tasks) : text;
     const linked = mayListTasks ? linkTaskLines(expanded, tasks) : null;
+    body.addClass("la-md-body");
     if (!linked) {
       await MarkdownRenderer.render(this.app, expanded, body, "", this);
+      polishMarkdown(body);
       return;
     }
     body.addClass("la-tasks");
@@ -731,7 +733,11 @@ export class ChatView extends ItemView {
     for (const part of linked.parts) {
       if (part.kind === "md") {
         list = null;
-        if (part.text.trim()) await MarkdownRenderer.render(this.app, part.text, body.createDiv("la-md"), "", this);
+        if (part.text.trim()) {
+          const el = body.createDiv("la-md");
+          await MarkdownRenderer.render(this.app, part.text, el, "", this);
+          polishMarkdown(el);
+        }
         continue;
       }
       list ??= body.createDiv("la-task-list");
@@ -788,4 +794,18 @@ export class ChatView extends ItemView {
       if (file instanceof TFile) void this.app.workspace.getLeaf("tab").openFile(file, { eState: { line: ref.line - 1 } });
     });
   }
+}
+
+/**
+ * Makes rendered Markdown fit a chat bubble: tables scroll sideways in their own box instead
+ * of squeezing words letter by letter, and bubbles with tables or code use the full width.
+ */
+function polishMarkdown(el: HTMLElement): void {
+  el.querySelectorAll("table").forEach((table) => {
+    if (table.parentElement?.hasClass("la-table-wrap")) return;
+    const wrap = createDiv("la-table-wrap");
+    table.replaceWith(wrap);
+    wrap.appendChild(table);
+  });
+  if (el.querySelector("table, pre")) el.closest(".la-bubble")?.addClass("la-wide");
 }

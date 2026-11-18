@@ -48,12 +48,15 @@ export interface AgentSettings {
   themeMode: ThemeMode;
   /** mobile: hide Obsidian's floating bottom bar while the chat is in front */
   hideMobileNavbar: boolean;
+  /** prompt size (characters) each Shortcut was found to accept after failing on a longer one */
+  learnedLimits: Record<string, number>;
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = {
   theme: "obsidian",
   themeMode: "auto",
   hideMobileNavbar: true,
+  learnedLimits: {},
   provider: "apple",
   chatgptShortcutName: "ChatGPT Agent",
   chatgptPromptCharBudget: 0,

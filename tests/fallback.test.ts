@@ -59,3 +59,56 @@ describe("Private Cloud first, on-device fallback", () => {
     await expect(r).rejects.toMatchObject({ kind: "timeout" });
   });
 });
+
+describe("retry the primary model with a shorter prompt", () => {
+  /** builds prompts of `budget` characters (default 11400, like the real failing Private Cloud request) */
+  function makeSized(primary: ModelBridge, fallback: ModelBridge | undefined, log: { tier: Tier; budget?: number }[], learned: number[]) {
+    return new AgentLoop({
+      bridge: primary,
+      fallbackBridge: fallback,
+      tools: new Map(),
+      settings: DEFAULT_SETTINGS,
+      toolCtx: { currentPath: () => null },
+      buildPrompt: (_s, _n, tier, budget) => {
+        log.push({ tier, budget });
+        return "x".repeat(budget ?? 11400);
+      },
+      approve: async () => true,
+      onEvent: () => {},
+      onShorterWorked: (b) => learned.push(b),
+    });
+  }
+
+  it("answers with the same model when the shorter prompt fits, and reports the size that worked", async () => {
+    const log: { tier: Tier; budget?: number }[] = [];
+    const learned: number[] = [];
+    const primary: ModelBridge = {
+      ask: async (p) => {
+        if (p.length > 8000) throw new BridgeError("error", "Your request can’t be completed.");
+        return final("cloud, shorter");
+      },
+    };
+    const r = await makeSized(primary, { ask: async () => final("local") }, log, learned).run();
+    expect(r.message).toBe("cloud, shorter");
+    expect(log).toEqual([{ tier: "primary", budget: undefined }, { tier: "primary", budget: 6270 }]);
+    expect(learned).toEqual([6270]);
+  });
+
+  it("falls back when the shorter prompt fails too", async () => {
+    const log: { tier: Tier; budget?: number }[] = [];
+    const r = await makeSized(
+      { ask: async () => { throw new BridgeError("error", "down"); } },
+      { ask: async () => final("local") },
+      log,
+      []
+    ).run();
+    expect(r.message).toBe("local");
+    expect(log.map((l) => l.tier)).toEqual(["primary", "primary", "fallback"]);
+  });
+
+  it("does not retry shorter after a timeout or for short prompts", async () => {
+    const log: { tier: Tier; budget?: number }[] = [];
+    await makeSized({ ask: async () => { throw new BridgeError("timeout", "slow"); } }, { ask: async () => final("local") }, log, []).run();
+    expect(log.map((l) => l.tier)).toEqual(["primary", "fallback"]);
+  });
+});

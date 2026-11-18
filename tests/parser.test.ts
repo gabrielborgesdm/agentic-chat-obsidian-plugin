@@ -63,3 +63,29 @@ describe("nested JSON in message", () => {
     expect(r.malformed).toBe(true);
   });
 });
+
+describe("parseReply with raw newlines (small on-device model)", () => {
+  it("accepts a multi-line message written with real line breaks inside the JSON string", () => {
+    const raw =
+      '{"type":"final","message":"Para as notas de viagem, aqui estão as listas e endereços:\n\n- [[hospedagem#Edimburgo]]: St Christopher\'s, check-in online.\n\t- Guinness Storehouse, 05/12"}';
+    const r = parseReply(raw);
+    expect(r.malformed).toBe(false);
+    expect(r.reply).toEqual({
+      type: "final",
+      message: "Para as notas de viagem, aqui estão as listas e endereços:\n\n- [[hospedagem#Edimburgo]]: St Christopher's, check-in online.\n\t- Guinness Storehouse, 05/12",
+    });
+  });
+  it("still parses tool calls whose arguments contain raw newlines", () => {
+    const r = parseReply('{"type":"tool_calls","calls":[{"name":"append_to_note","arguments":{"path":"a.md","content":"linha 1\nlinha 2"}}]}');
+    expect(r.malformed).toBe(false);
+    expect(r.reply).toEqual({ type: "tool_calls", calls: [{ name: "append_to_note", arguments: { path: "a.md", content: "linha 1\nlinha 2" } }] });
+  });
+});
+
+describe("task list references", () => {
+  it("accepts a reply that starts with {{tasks: …}} as a final answer (no repair call)", () => {
+    const r = parseReply("{{tasks: Viagens/2026-11-travel/checklist.md}}\n\nAs tarefas estão acima.");
+    expect(r.malformed).toBe(false);
+    expect(r.reply).toEqual({ type: "final", message: "{{tasks: Viagens/2026-11-travel/checklist.md}}\n\nAs tarefas estão acima." });
+  });
+});

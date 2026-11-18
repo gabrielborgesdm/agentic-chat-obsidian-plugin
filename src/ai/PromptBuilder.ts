@@ -48,7 +48,7 @@ export function buildSystem(input: Pick<PromptInput, "tools" | "settings" | "tod
     "Rules:",
     "1. The \"message\" value is plain human-readable text (Markdown ok), NEVER JSON or a data structure.",
     "2. You know NOTHING about the vault except the Context below and tool results. Never guess note names, paths or contents. If the Context does not clearly answer, call a tool first (search_notes to find, then read_note).",
-    "3. Questions about tasks/checklists/to-dos: use list_tasks (with the note's path when you know it). Today's daily note: get_daily_note.",
+    "3. Questions about tasks/checklists/to-dos: to show the tasks of a note or folder, do NOT copy them: write a line {{tasks: path/to/note.md}} (open tasks) or {{tasks: path/to/note.md | all}}, one line per note, plus at most one short sentence. The app shows them as live checkboxes the user can tick. Only when the user wants a subset (e.g. only Dublin), list those tasks one per line as \"- [ ] task text\", copying each text exactly. If you don't know which note, use list_tasks or search_notes first. Today's daily note: get_daily_note.",
     "3a. You DO have these tools: never say you cannot access them. If the Context shows only part of something (e.g. \"N more\"), call the tool to get the rest before answering.",
     "3b. Attached images/PDFs cannot be read by you; you can only link them in a note with ![[path]] (images) or [[path]] using append_to_note/create_note. Text attachments appear in the Context.",
     "4. Use at most 3 calls at once. Prefer create_note/append_to_note over update_note. Paths are relative to the vault root. Escape newlines in JSON strings as \\n.",
@@ -104,12 +104,12 @@ export function buildPrompt(input: PromptInput): string {
   let scratch = input.scratch.map((s, i) => scratchPart(s, i, perResult)).join("\n");
   const note = input.note ? `\nNOTE: ${input.note}` : "";
   // Said last, right before the answer, because the notes in between are often in another language.
-  // The model recognizes the language itself: nothing is hard-coded.
-  const quote = last && last.text.trim() && !last.text.trim().startsWith("/") ? clip(last.text.trim().replace(/\s+/g, " "), 160) : "";
+  // The model recognizes the language itself: nothing is hard-coded. The user's words are NOT
+  // quoted here: the small on-device model copied a quoted request back as its answer.
   const tail =
-    (quote
-      ? `\nWrite the "message" in the same language as this user message: «${quote}» (not the language of the notes).`
-      : "\nWrite the \"message\" in the same language as the user's latest message.") + "\nReply with one JSON object.";
+    '\nAnswer the request in the "User:" line above (do not repeat it), using the Context and tools. ' +
+    'Write the "message" in the language of that User line, not the language of the notes.' +
+    "\nReply with one JSON object.";
 
   let remaining = budget - system.length - userBlock.length - scratch.length - note.length - tail.length - 80;
   if (remaining < 0 && scratch.length) {

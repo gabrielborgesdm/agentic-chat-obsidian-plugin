@@ -87,6 +87,23 @@ export class AgentSettingsTab extends PluginSettingTab {
     if (s.provider === "apple") this.appleFields(containerEl, s, save);
     else this.chatgptFields(containerEl, s, save);
 
+    const learned = Object.entries(s.learnedLimits ?? {});
+    if (learned.length) {
+      new Setting(containerEl)
+        .setName("Learned prompt sizes")
+        .setDesc(
+          learned.map(([name, n]) => `“${name}” failed on longer prompts and works with up to ${n.toLocaleString()} characters.`).join(" ") +
+            " Forget this if you changed the Shortcut's model (e.g. to Cloud Pro)."
+        )
+        .addButton((b) =>
+          b.setButtonText("Forget").onClick(() => {
+            s.learnedLimits = {};
+            save();
+            this.redraw();
+          })
+        );
+    }
+
     this.renderTest(containerEl);
     new Setting(containerEl)
       .setName("Response timeout (seconds)")

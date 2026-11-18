@@ -1,6 +1,6 @@
 import { App, TFile, TFolder, moment } from "obsidian";
 import { STOPWORDS } from "./stopwords";
-import { PathError, baseName, ensureMd, fold, normalizeVaultPath, numberedPath, parentFolder } from "./paths";
+import { PathError, baseName, ensureMd, fold, looseRegex, normalizeVaultPath, numberedPath, parentFolder } from "./paths";
 
 export interface SearchHit {
   path: string;
@@ -213,6 +213,14 @@ export class VaultService {
               score += count;
               if (firstIdx < 0 || idx < firstIdx) firstIdx = idx;
               hit = true;
+            } else if (t.length >= 4) {
+              // "teste123" should find "teste 123" / "teste-123": allow a space, - or _ between characters
+              const m = looseRegex(t).exec(body);
+              if (m) {
+                score += 1;
+                if (firstIdx < 0 || m.index < firstIdx) firstIdx = m.index;
+                hit = true;
+              }
             }
             if (hit) matched++;
           }
@@ -367,7 +375,7 @@ export class VaultService {
   // ---------- tasks ----------
 
   async listTasks(pathInput?: unknown, status: "open" | "done" | "all" = "open", limit = 30): Promise<TaskLine[]> {
-    const files = pathInput ? [this.requireFile(pathInput)] : this.app.vault.getMarkdownFiles();
+    const files = pathInput ? this.notesAt(pathInput) : this.app.vault.getMarkdownFiles();
     const out: TaskLine[] = [];
     for (const f of files) {
       if (out.length >= limit) break;
@@ -384,6 +392,49 @@ export class VaultService {
       }
     }
     return out;
+  }
+
+  /**
+   * Toggles the task at a known line (from a chat checkbox). If the note changed since,
+   * finds the same task by its exact text instead of toggling the wrong line.
+   */
+  async toggleTaskAt(pathInput: unknown, lineNo: number, taskText: string): Promise<{ path: string; before: string; after: string; nowDone: boolean }> {
+    const f = this.requireFile(pathInput);
+    const cur = await this.app.vault.read(f);
+    const lines = cur.split("\n");
+    const same = (l: string | undefined) => {
+      const m = l?.match(TASK_RE);
+      return !!m && m[4].trim() === taskText.trim();
+    };
+    let i = lineNo - 1;
+    if (!same(lines[i])) {
+      i = lines.findIndex((l) => same(l));
+      if (i < 0) throw new PathError("That task changed in the note. Ask again to refresh the list.");
+    }
+    const m = lines[i].match(TASK_RE)!;
+    const nowDone = m[2] === " ";
+    lines[i] = m[1] + (nowDone ? "x" : " ") + m[3] + m[4];
+    const after = lines.join("\n");
+    await this.app.vault.process(f, () => after);
+    return { path: f.path, before: cur, after, nowDone };
+  }
+
+  /** A note, or every note inside a folder (models often pass a project's folder). */
+  private notesAt(input: unknown): TFile[] {
+    const file = this.resolve(input);
+    if (file) return [file];
+    if (typeof input === "string") {
+      const norm = normalizeVaultPath(input.replace(/\/+$/, ""), { allowEmpty: true });
+      const folder = norm ? this.app.vault.getAbstractFileByPath(norm) : this.app.vault.getRoot();
+      if (folder instanceof TFolder) {
+        const prefix = norm ? norm + "/" : "";
+        return this.app.vault
+          .getMarkdownFiles()
+          .filter((f) => f.path.startsWith(prefix))
+          .sort((a, b) => a.path.localeCompare(b.path));
+      }
+    }
+    throw new PathError(`Note or folder not found: ${String(input)}`);
   }
 
   async toggleTask(input: unknown, taskText: string): Promise<{ path: string; before: string; after: string; nowDone: boolean }> {

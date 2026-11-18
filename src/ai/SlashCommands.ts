@@ -83,14 +83,8 @@ export function formatToolOutput(name: string, output: string): string {
         })
         .join("\n");
     case "list_tasks":
-      if (output.startsWith("No tasks")) return output;
-      return output
-        .split("\n")
-        .map((l) => {
-          const mm = l.match(/^(.*?):(\d+) \[(.)\] (.*)$/);
-          return mm ? `- ${mm[4]} — [[${mm[1]}]]` : l;
-        })
-        .join("\n");
+      // kept as "path:line [ ] text": the chat turns these lines into checkboxes linked to each task
+      return output;
     case "read_note":
     case "get_daily_note":
     case "get_current_note":

@@ -102,7 +102,7 @@ export function buildTools(vault: VaultService): ToolDef[] {
     },
     {
       name: "list_tasks",
-      signature: "list_tasks(path?, status?) - checkbox tasks; status open|done|all (default open); path optional (default whole vault)",
+      signature: "list_tasks(path?, status?) - checkbox tasks; path = a note OR a folder (all its notes), optional (default whole vault); status open|done|all (default open)",
       permission: "read",
       async run(a) {
         const p = str(a, "path", { optional: true });

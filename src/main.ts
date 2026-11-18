@@ -8,13 +8,15 @@ import { ShortcutBridge } from "./ai/ShortcutBridge";
 import { AgentSettingsTab } from "./settings/SettingsTab";
 import { DEFAULT_SETTINGS, type AgentSettings, type ProviderId } from "./settings/defaults";
 import { providerOf, sanitizeSettings, type Route, type RouteTier } from "./providers/providers";
-import { ConversationStore } from "./storage/ConversationStore";
+import { ConversationStore, uid } from "./storage/ConversationStore";
 import { buildReport } from "./storage/Report";
 import { Trace, type ModelTrace } from "./storage/Trace";
 import { rollbackOperation } from "./storage/OperationLog";
 import { buildTools, toolMap } from "./tools/registry";
 import { BridgeError, type Attachment, type ToolCall, type Conversation, type ModelBridge, type ScratchEntry, type ToolDef } from "./types";
 import { ChatView, VIEW_TYPE } from "./ui/ChatView";
+import { paintApp } from "./ui/themes";
+import type { TaskRef } from "./ui/taskLinks";
 import { DiagnosticsModal } from "./ui/DiagnosticsModal";
 import { askApproval } from "./ui/ToolApproval";
 import { askCreateLocation } from "./ui/CreateNoteModal";
@@ -152,6 +154,7 @@ export default class LocalAgentPlugin extends Plugin {
     void this.store.flush();
     void this.trace?.flush();
     document.body.removeClass("la-chat-focus");
+    paintApp(null);
   }
 
   async saveSettings(): Promise<void> {
@@ -184,6 +187,31 @@ export default class LocalAgentPlugin extends Plugin {
     } catch (e: any) {
       new Notice("Could not copy the report: " + (e?.message ?? e), 6000);
     }
+  }
+
+  private taskCache: { at: number; tasks: TaskRef[] } | null = null;
+
+  /** Every checkbox task in the vault, for linking the tasks an answer lists (cached briefly). */
+  async allTasks(): Promise<TaskRef[]> {
+    if (this.taskCache && Date.now() - this.taskCache.at < 5000) return this.taskCache.tasks;
+    const tasks = await this.vault2.listTasks(undefined, "all", 5000);
+    this.taskCache = { at: Date.now(), tasks };
+    return tasks;
+  }
+
+  /** Checks/unchecks a task from a chat checkbox; the change can be undone like any agent edit. */
+  async toggleTaskRef(ref: TaskRef): Promise<boolean> {
+    const r = await this.vault2.toggleTaskAt(ref.path, ref.line, ref.text);
+    this.store.addOp({ id: uid(), ts: Date.now(), kind: "update", path: r.path, before: r.before, after: r.after });
+    this.taskCache = null;
+    return r.nowDone;
+  }
+
+  /** The tier's budget, capped by the size this Shortcut was found to accept (0 = no limit). */
+  effectiveBudget(t: RouteTier): number {
+    const learned = this.settings.learnedLimits?.[t.shortcut] ?? 0;
+    if (!learned) return t.budget;
+    return t.budget > 0 ? Math.min(t.budget, learned) : learned;
   }
 
   /** Runs the selected provider's Shortcut once with a known prompt (PONG round trip). */
@@ -307,8 +335,11 @@ export default class LocalAgentPlugin extends Plugin {
 
   /** Adds/removes the body class that hides Obsidian's mobile bottom bar while the chat is in front. */
   syncMobileChrome(): void {
-    const on = Platform.isMobile && this.settings.hideMobileNavbar && !!this.app.workspace.getActiveViewOfType(ChatView);
+    const view = this.app.workspace.getActiveViewOfType(ChatView);
+    const on = Platform.isMobile && this.settings.hideMobileNavbar && !!view;
     document.body.toggleClass("la-chat-focus", on);
+    // With a chat theme, the rest of the screen (header, area behind the hidden bar) takes its colors too.
+    paintApp(on && view && this.settings.theme !== "obsidian" ? view.contentEl : null);
   }
 
   /** Local Agent entries in Obsidian's note, folder and editor menus. */
@@ -568,6 +599,7 @@ export default class LocalAgentPlugin extends Plugin {
       const lastUser = [...conv.messages].reverse().find((m) => m.role === "user");
       let context = await buildContext(this.vault2, lastUser?.text ?? "", this.currentPath(), {
         retrieve: this.settings.autoRetrieve,
+        attachmentFolder: this.settings.attachmentFolder,
       });
       const excerpts: string[] = [];
       for (const a of lastUser?.attachments ?? []) {
@@ -611,11 +643,11 @@ export default class LocalAgentPlugin extends Plugin {
         tools: toolMap(this.tools),
         settings: this.settings,
         toolCtx: { currentPath: this.currentPath },
-        buildPrompt: (scratch, note, tier) =>
+        buildPrompt: (scratch, note, tier, override) =>
           buildPrompt({
             settings: {
               ...this.settings,
-              promptCharBudget: (tier === "primary" ? route.primary : route.fallback ?? route.primary).budget,
+              promptCharBudget: override ?? this.effectiveBudget(tier === "primary" ? route.primary : route.fallback ?? route.primary),
             },
             tools: this.tools,
             history: conv.messages.slice(0, historyEnd).filter((m) => m.role !== "error"),
@@ -625,6 +657,13 @@ export default class LocalAgentPlugin extends Plugin {
             note,
             today: today(),
           }),
+        onShorterWorked: (size) => {
+          // remember it: later requests to this Shortcut start at a size it accepts
+          const name = route.primary.shortcut;
+          this.settings.learnedLimits = { ...this.settings.learnedLimits, [name]: size };
+          void this.saveData(this.settings);
+          this.trace.add({ kind: "event", convId: conv.id, ts: Date.now(), text: `"${name}" worked with ${size} characters; using that size from now on.` });
+        },
         approve: async (call, tool, preview) => {
           this.statusLabel = "Waiting for your approval…";
           this.emit();
@@ -647,6 +686,17 @@ export default class LocalAgentPlugin extends Plugin {
             step = e.step;
             const label = (e.tier === "primary" ? route.primary : route.fallback ?? route.primary).label;
             this.statusLabel = `Thinking${e.step ? ` (step ${e.step + 1})` : ""} · ${label}…`;
+            this.emit();
+            return;
+          }
+          if (e.kind === "shrink") {
+            this.trace.add({
+              kind: "event",
+              convId: conv.id,
+              ts: Date.now(),
+              text: `"${route.primary.shortcut}" failed with a ${e.from}-character prompt (${e.reason}). Retrying it with ${e.to} characters.`,
+            });
+            this.statusLabel = `Retrying ${route.primary.label} with a shorter prompt…`;
             this.emit();
             return;
           }

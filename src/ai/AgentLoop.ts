@@ -17,6 +17,8 @@ export type Tier = "primary" | "fallback";
 export type AgentEvent =
   | { kind: "thinking"; step: number; tier: Tier }
   | { kind: "fallback"; reason: string }
+  /** the primary model failed on a long prompt: retrying it with a shorter one */
+  | { kind: "shrink"; from: number; to: number; reason: string }
   | { kind: "tool_start"; call: ToolCall }
   | { kind: "tool_end"; call: ToolCall; ok: boolean; output: string; op?: OperationRecord }
   | { kind: "tool_rejected"; call: ToolCall };
@@ -29,7 +31,9 @@ export interface AgentDeps {
   settings: AgentSettings;
   toolCtx: ToolContext;
   /** builds the prompt for the current scratch state */
-  buildPrompt(scratch: ScratchEntry[], note: string | undefined, tier: Tier): string | Promise<string>;
+  buildPrompt(scratch: ScratchEntry[], note: string | undefined, tier: Tier, budget?: number): string | Promise<string>;
+  /** a shorter prompt (this many characters) worked on the primary model after a failure */
+  onShorterWorked?(budget: number): void;
   /** ask the user; resolves true to run */
   /** false = rejected; true = approved as is; { arguments } = approved with the user's changes (e.g. another folder). */
   approve(call: ToolCall, tool: ToolDef, preview: string): Promise<boolean | { arguments: Record<string, unknown> }>;
@@ -62,6 +66,8 @@ export function needsApproval(tool: ToolDef, s: AgentSettings): boolean {
 }
 
 const MAX_CALLS_PER_STEP = 3;
+/** prompts shorter than this are never retried shorter (the on-device size) */
+const SHRINK_MIN = 6000;
 
 export class AgentLoop {
   constructor(private deps: AgentDeps) {}
@@ -97,22 +103,44 @@ export class AgentLoop {
         raw = injected;
         injected = undefined;
       } else {
-        const ask = async () => {
-          const prompt = await d.buildPrompt(scratch, note, tier);
+        let lastLen = 0;
+        const ask = async (budget?: number) => {
+          const prompt = await d.buildPrompt(scratch, note, tier, budget);
+          lastLen = prompt.length;
           await d.persistPending?.(scratch, step);
           return (tier === "primary" ? d.bridge : d.fallbackBridge!).ask(prompt, opts.signal);
         };
+        const isCancel = (e: unknown) => e instanceof BridgeError && e.kind === "cancelled";
+        let answer: string | undefined;
         try {
-          raw = await ask();
+          answer = await ask();
         } catch (e) {
-          const cancelled = e instanceof BridgeError && e.kind === "cancelled";
-          if (tier !== "primary" || !d.fallbackBridge || cancelled) throw e;
-          // Primary model unavailable (e.g. offline for Private Cloud): same request on the fallback model.
-          tier = "fallback";
-          d.onEvent({ kind: "fallback", reason: (e as Error)?.message ?? String(e) });
-          d.onEvent({ kind: "thinking", step, tier });
-          raw = await ask();
+          if (isCancel(e)) throw e;
+          let err = e;
+          // A long prompt that fails (not a timeout) may simply be too long for this model:
+          // try the same model once with a shorter prompt before giving up on it.
+          const timedOut = e instanceof BridgeError && e.kind === "timeout";
+          if (tier === "primary" && !timedOut && lastLen > SHRINK_MIN) {
+            const to = Math.max(SHRINK_MIN, Math.floor(lastLen * 0.55));
+            d.onEvent({ kind: "shrink", from: lastLen, to, reason: (e as Error)?.message ?? String(e) });
+            try {
+              answer = await ask(to);
+              d.onShorterWorked?.(to);
+            } catch (e2) {
+              if (isCancel(e2)) throw e2;
+              err = e2;
+            }
+          }
+          if (answer === undefined) {
+            if (tier !== "primary" || !d.fallbackBridge) throw err;
+            // Primary model unavailable (e.g. offline for Private Cloud): same request on the fallback model.
+            tier = "fallback";
+            d.onEvent({ kind: "fallback", reason: (err as Error)?.message ?? String(err) });
+            d.onEvent({ kind: "thinking", step, tier });
+            answer = await ask();
+          }
         }
+        raw = answer;
       }
       note = undefined;
 

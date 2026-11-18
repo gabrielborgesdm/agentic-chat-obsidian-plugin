@@ -1,23 +1,28 @@
 import type { VaultService } from "./VaultService";
 
+/** Folders that never hold notes worth suggesting: attachments, code caches, hidden folders. */
+export function noteFolders(folders: string[], attachmentFolder = ""): string[] {
+  const att = attachmentFolder.trim().replace(/^\/+|\/+$/g, "").toLowerCase();
+  return folders.filter((f) =>
+    f.split("/").every((seg) => {
+      const s = seg.toLowerCase();
+      return !s.startsWith(".") && !s.startsWith("_") && s !== "node_modules" && s !== "anexos" && s !== "attachments" && s !== att;
+    }) && !(att && f.toLowerCase().startsWith(att + "/"))
+  );
+}
+
 /**
- * Automatic retrieval: gathers a small amount of context BEFORE the first model
- * call so most questions finish in a single Shortcuts round trip.
+ * Automatic retrieval: gathers context BEFORE the first model call so most questions
+ * finish in a single Shortcuts round trip. Most useful first: when a model has a small
+ * budget, the prompt builder cuts the context from the end.
  */
 export async function buildContext(
   vault: VaultService,
   userText: string,
   currentPath: string | null,
-  opts: { retrieve: boolean }
+  opts: { retrieve: boolean; attachmentFolder?: string }
 ): Promise<string> {
   const parts: string[] = [];
-  try {
-    // lets the model pick a real folder instead of asking the user
-    const folders = vault.allFolders();
-    if (folders.length) parts.push("Vault folders: " + folders.slice(0, 300).join(", "));
-  } catch {
-    /* ignore */
-  }
   if (!currentPath) parts.push("Current note: none open (for 'add' requests use append_to_daily_note).");
   if (currentPath) {
     try {
@@ -39,9 +44,6 @@ export async function buildContext(
     let hits: { path: string; snippet: string }[] = [];
     try {
       hits = (await vault.search(userText, 4)).filter((h) => h.path !== currentPath).slice(0, 3);
-      if (hits.length) {
-        parts.push("Possibly relevant notes:\n" + hits.map((h) => `- ${h.path}${h.snippet ? ": " + h.snippet.slice(0, 220) : ""}`).join("\n"));
-      }
     } catch {
       /* ignore retrieval failures */
     }
@@ -68,6 +70,16 @@ export async function buildContext(
         /* ignore */
       }
     }
+    if (hits.length) {
+      parts.push("Possibly relevant notes:\n" + hits.map((h) => `- ${h.path}${h.snippet ? ": " + h.snippet.slice(0, 220) : ""}`).join("\n"));
+    }
+  }
+  try {
+    // last: lets the model pick a real folder for new notes, and is the first thing cut when space is short
+    const folders = noteFolders(vault.allFolders(), opts.attachmentFolder);
+    if (folders.length) parts.push("Vault folders: " + folders.slice(0, 300).join(", "));
+  } catch {
+    /* ignore */
   }
   return parts.join("\n\n");
 }

@@ -50,3 +50,19 @@ export function baseName(path: string): string {
 export function fold(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
+
+const looseCache = new Map<string, RegExp>();
+
+/**
+ * A search token that also matches with a space, "-" or "_" between any two characters:
+ * "teste123" finds "teste 123" and "teste-123". Used only when the exact token isn't found.
+ */
+export function looseRegex(token: string): RegExp {
+  let re = looseCache.get(token);
+  if (!re) {
+    const chars = Array.from(token.replace(/[\s_-]+/g, ""));
+    re = new RegExp(chars.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s_-]?"));
+    looseCache.set(token, re);
+  }
+  return re;
+}

@@ -25,13 +25,46 @@ export function extractJsonObject(text: string): string | null {
   return null;
 }
 
+/**
+ * Escapes raw line breaks and tabs inside JSON strings. Small models often write a
+ * multi-line "message" with real newlines, which JSON.parse rejects.
+ */
+export function escapeControlCharsInStrings(s: string): string {
+  let out = "";
+  let inStr = false;
+  let esc = false;
+  for (const c of s) {
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      else if (c === "\n") {
+        out += "\\n";
+        continue;
+      } else if (c === "\r") {
+        out += "\\r";
+        continue;
+      } else if (c === "\t") {
+        out += "\\t";
+        continue;
+      }
+    } else if (c === '"') inStr = true;
+    out += c;
+  }
+  return out;
+}
+
 function tryParse(s: string): unknown {
+  const fixed = escapeControlCharsInStrings(s);
   const attempts = [
     s,
+    // raw newlines/tabs inside strings
+    fixed,
     // smart quotes -> straight quotes
     s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'"),
     // trailing commas
     s.replace(/,\s*([}\]])/g, "$1"),
+    fixed.replace(/,\s*([}\]])/g, "$1"),
     s.replace(/[“”]/g, '"').replace(/,\s*([}\]])/g, "$1"),
   ];
   for (const a of attempts) {
@@ -78,6 +111,8 @@ function normalize(obj: any): ModelReply | null {
 export function parseReply(raw: string): ParsedReply {
   const text = (raw ?? "").trim();
   if (!text) return { reply: { type: "final", message: "" }, malformed: true };
+  // "{{tasks: path}}" answers start with "{" but are plain text, not broken JSON (no repair round trip)
+  if (/^\{\{\s*tasks?\s*:/i.test(text) && !/"type"\s*:/.test(text)) return { reply: { type: "final", message: text }, malformed: false };
   const unfenced = text.replace(/```(?:json)?/gi, "").trim();
   const block = extractJsonObject(unfenced);
   if (block) {

@@ -130,5 +130,6 @@ export function sanitizeSettings(s: AgentSettings): AgentSettings {
   if (!(s.provider in PROVIDERS)) s.provider = "apple";
   if (!["obsidian", "cherry", "graphite", "ocean", "sage"].includes(s.theme)) s.theme = "obsidian";
   if (!["auto", "obsidian", "light", "dark"].includes(s.themeMode)) s.themeMode = "auto";
+  if (!s.learnedLimits || typeof s.learnedLimits !== "object") s.learnedLimits = {};
   return s;
 }

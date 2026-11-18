@@ -31,9 +31,10 @@ describe("slash commands", () => {
     expect(parseSlash("what about /tasks?", null)).toBeNull();
     expect(parseSlash("hello", null)).toBeNull();
   });
-  it("formats search and task output as clickable links", () => {
+  it("formats search output as links and keeps task lines linkable", () => {
     expect(formatToolOutput("search_notes", "Viagens/a.md :: snippet")).toBe("- [[Viagens/a.md]] — snippet");
-    expect(formatToolOutput("list_tasks", "Viagens/checklist.md:22 [ ] Apps gerais")).toBe("- Apps gerais — [[Viagens/checklist.md]]");
+    // tasks stay as "path:line [ ] text" so the chat can link each line to a checkbox
+    expect(formatToolOutput("list_tasks", "Viagens/checklist.md:22 [ ] Apps gerais")).toBe("Viagens/checklist.md:22 [ ] Apps gerais");
   });
 });
 

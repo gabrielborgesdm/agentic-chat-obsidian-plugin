@@ -40,3 +40,16 @@ describe("helpers", () => {
     expect(fold("Saúde Ação")).toBe("saude acao");
   });
 });
+
+import { looseRegex } from "../src/vault/paths";
+describe("looseRegex", () => {
+  it("lets 'teste123' find 'teste 123', 'teste-123' and 'teste_123', but not other words", () => {
+    const re = looseRegex("teste123");
+    expect(re.test("- [ ] teste 123")).toBe(true);
+    expect(re.test("teste-123")).toBe(true);
+    expect(re.test("teste_123")).toBe(true);
+    expect(re.test("teste 12 3x")).toBe(true);
+    expect(re.test("teste 124")).toBe(false);
+    expect(re.test("testes")).toBe(false);
+  });
+});

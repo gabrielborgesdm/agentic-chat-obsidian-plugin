@@ -7,6 +7,7 @@ import { NotePicker } from "./NotePicker";
 import { PROVIDERS, providerOf } from "../providers/providers";
 import { MODES, THEMES, applyTheme } from "./themes";
 import { openImageViewer } from "./ImageViewer";
+import { expandTaskEmbeds, linkTaskLines, splitTaskText, type TaskRef } from "./taskLinks";
 import { canSpeak, isSpeaking, speak, stopSpeaking } from "../voice/Voice";
 
 export const VIEW_TYPE = "local-agent-chat";
@@ -81,7 +82,11 @@ export class ChatView extends ItemView {
       const a = target.closest("a.internal-link") as HTMLAnchorElement | null;
       if (a) {
         e.preventDefault();
-        void this.app.workspace.openLinkText(a.getAttribute("data-href") ?? a.getAttribute("href") ?? "", "", false);
+        e.stopPropagation();
+        // links inside a task resolve from that task's note ("hospedagem#Edimburgo" → the trip's hospedagem.md);
+        // open in a new tab so the chat stays where it was
+        const from = a.closest<HTMLElement>("[data-source]")?.dataset.source ?? "";
+        void this.app.workspace.openLinkText(a.getAttribute("data-href") ?? a.getAttribute("href") ?? "", from, "tab");
       }
     });
 
@@ -159,6 +164,8 @@ export class ChatView extends ItemView {
 
   private applyTheme(): void {
     applyTheme(this.contentEl, this.plugin.settings.theme, this.plugin.settings.themeMode);
+    // the app around the chat (header, area behind the hidden bottom bar) follows the same colors
+    this.plugin.syncMobileChrome();
   }
 
   /** The view's ⋯ menu: theme and light/dark choices. */
@@ -340,6 +347,8 @@ export class ChatView extends ItemView {
       "touchstart",
       (e) => {
         if (target.hasClass("la-selecting") || e.touches.length !== 1) return;
+        // taps on a task row check it or open its note: no long-press (and no press animation)
+        if ((e.target as HTMLElement | null)?.closest?.(".la-task-row")) return;
         sx = e.touches[0].clientX;
         sy = e.touches[0].clientY;
         target.addClass("la-pressing");
@@ -395,7 +404,7 @@ export class ChatView extends ItemView {
 
   private messageMenu(menu: Menu, m: ChatMessage, bubble: HTMLElement, isLast: boolean): void {
     const hasText = !!m.text && m.text !== "(attachment)";
-    if (hasText) menu.addItem((i) => i.setTitle("Copy").setIcon("copy").onClick(() => void this.copy(m.text)));
+    if (hasText) menu.addItem((i) => i.setTitle("Copy").setIcon("copy").onClick(() => void this.copy(m.role === "assistant" ? (bubble.querySelector<HTMLElement>(".la-text")?.innerText ?? m.text) : m.text)));
 
     if (m.role === "assistant" && hasText) {
       if (canSpeak()) {
@@ -438,14 +447,40 @@ export class ChatView extends ItemView {
 
   // ---------- rendering ----------
 
+  /** what the message list was last drawn from; see render() */
+  private drawn = { key: "", conv: "", count: -1, busy: false };
+
   render(): void {
     if (!this.listEl) return;
     const conv = this.plugin.store.active();
     this.titleEl2.setText(conv.title);
     this.applyTheme();
-    this.listEl.empty();
     this.renderCtx();
     this.renderStrip();
+    this.sendBtn.empty();
+    setIcon(this.sendBtn, this.plugin.busy ? "square" : "arrow-up");
+    this.sendBtn.setAttr("aria-label", this.plugin.busy ? "Stop" : "Send");
+
+    // Obsidian events (opening a note, settings…) call render() too: redraw the messages only when
+    // they changed, and jump to the bottom only for new content, so taps don't make the chat leap.
+    const last = conv.messages[conv.messages.length - 1];
+    const ops = this.plugin.store.data.ops;
+    const key = JSON.stringify([
+      conv.id,
+      conv.messages.length,
+      last?.id,
+      last?.text.length,
+      this.plugin.busy,
+      this.plugin.statusLabel,
+      ops.length,
+      ops.filter((o) => o.rolledBack).length,
+      conv.messages.length ? "" : `${this.plugin.currentPath()}|${this.plugin.settings.provider}`,
+    ]);
+    if (key === this.drawn.key) return;
+    const toBottom = conv.id !== this.drawn.conv || conv.messages.length !== this.drawn.count || this.plugin.busy !== this.drawn.busy;
+    const keepTop = this.listEl.scrollTop;
+    this.drawn = { key, conv: conv.id, count: conv.messages.length, busy: this.plugin.busy };
+    this.listEl.empty();
 
     if (!conv.messages.length) this.renderWelcome();
 
@@ -460,10 +495,14 @@ export class ChatView extends ItemView {
       if (this.plugin.statusLabel) b.createSpan({ cls: "la-status", text: this.plugin.statusLabel });
     }
 
-    this.sendBtn.empty();
-    setIcon(this.sendBtn, this.plugin.busy ? "square" : "arrow-up");
-    this.sendBtn.setAttr("aria-label", this.plugin.busy ? "Stop" : "Send");
-    this.listEl.scrollTop = this.listEl.scrollHeight;
+    if (toBottom) this.listEl.scrollTop = this.listEl.scrollHeight;
+    else {
+      // answers render asynchronously: put the scroll back once their content is in place
+      const restore = () => (this.listEl.scrollTop = keepTop);
+      restore();
+      window.setTimeout(restore, 60);
+      window.setTimeout(restore, 250);
+    }
   }
 
   /** Start screen of an empty chat: greeting, suggestion cards and the instant commands. */
@@ -479,7 +518,7 @@ export class ChatView extends ItemView {
     const hero = w.createDiv("la-welcome-hero");
     setIcon(hero.createDiv("la-welcome-mark"), "sparkles");
     hero.createDiv({ cls: "la-welcome-title", text: greeting });
-    hero.createDiv({ cls: "la-welcome-sub", text: "Ask about your notes, or tell me what to write, change or organize." });
+    hero.createDiv({ cls: "la-welcome-sub", text: "Ask about your notes, or tell me what to change." });
     const badge = hero.createDiv({ cls: "la-welcome-badge", attr: { "aria-label": "Change provider" } });
     setIcon(badge.createSpan(), "cpu");
     badge.createSpan({ text: provider.label });
@@ -494,13 +533,26 @@ export class ChatView extends ItemView {
       ...(cur ? ([["plus-circle", "Add to note", curName, "/add ", false]] as [string, string, string, string, boolean][]) : []),
       ["calendar-days", "Daily note", "Capture to today", "/daily ", false],
     ];
+    // Plain elements, not <button>: Obsidian's button styles would override the theme colors.
+    const tappable = (el: HTMLElement, fn: () => void) => {
+      el.setAttr("role", "button");
+      el.tabIndex = 0;
+      el.addEventListener("click", fn);
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          fn();
+        }
+      });
+    };
     const grid = w.createDiv("la-welcome-grid");
     for (const [icon, title, sub, text, send] of cards) {
-      const c = grid.createEl("button", { cls: "la-card" });
+      const c = grid.createDiv("la-card");
       setIcon(c.createDiv("la-card-icon"), icon);
-      c.createDiv({ cls: "la-card-title", text: title });
-      c.createDiv({ cls: "la-card-sub", text: sub });
-      c.addEventListener("click", () => (send ? void this.plugin.send(text) : this.setDraft(text)));
+      const t = c.createDiv("la-card-text");
+      t.createDiv({ cls: "la-card-title", text: title });
+      t.createDiv({ cls: "la-card-sub", text: sub });
+      tappable(c, () => (send ? void this.plugin.send(text) : this.setDraft(text)));
     }
 
     const cmds = w.createEl("details", { cls: "la-welcome-cmds" });
@@ -518,12 +570,11 @@ export class ChatView extends ItemView {
       ["/undo", "undo the last change", true],
     ];
     for (const [cmd, desc, send] of list) {
-      const row = cmds.createEl("button", { cls: "la-cmd-row" });
+      const row = cmds.createDiv("la-cmd-row");
       row.createSpan({ cls: "la-cmd", text: cmd.trim() });
       row.createSpan({ cls: "la-cmd-desc", text: desc });
-      row.addEventListener("click", () => (send ? void this.plugin.send(cmd) : this.setDraft(cmd)));
+      tappable(row, () => (send ? void this.plugin.send(cmd) : this.setDraft(cmd)));
     }
-    w.createDiv({ cls: "la-hint", text: "Tip: press and hold any message for options." });
   }
 
   /** Provider choices (used by the provider pill and the welcome badge). */
@@ -656,8 +707,85 @@ export class ChatView extends ItemView {
       if (m.text !== "(attachment)") bubble.createDiv({ text: m.text, cls: "la-text" });
     } else {
       const body = bubble.createDiv("la-text");
-      void MarkdownRenderer.render(this.app, m.text, body, "", this);
+      void this.renderAnswer(body, m.text);
     }
     this.attachMenu(bubble, (menu) => this.messageMenu(menu, m, bubble, isLast));
+  }
+
+  /**
+   * Renders an answer. Vault tasks it lists are drawn as our own checkbox rows (not Obsidian's
+   * Markdown checkboxes, which carry their own click handling and layout): the circle checks the
+   * task in its note (undoable), the text opens the note at that task. State comes from the note.
+   */
+  private async renderAnswer(body: HTMLElement, text: string): Promise<void> {
+    const mayListTasks = /\.md\s*:\s*\d+|^\s*[-*+]\s+\[[ xX]\]|\{\{\s*tasks?\s*:/im.test(text);
+    const tasks = mayListTasks ? await this.plugin.allTasks().catch(() => []) : [];
+    const expanded = mayListTasks ? expandTaskEmbeds(text, tasks) : text;
+    const linked = mayListTasks ? linkTaskLines(expanded, tasks) : null;
+    if (!linked) {
+      await MarkdownRenderer.render(this.app, expanded, body, "", this);
+      return;
+    }
+    body.addClass("la-tasks");
+    let list: HTMLElement | null = null;
+    for (const part of linked.parts) {
+      if (part.kind === "md") {
+        list = null;
+        if (part.text.trim()) await MarkdownRenderer.render(this.app, part.text, body.createDiv("la-md"), "", this);
+        continue;
+      }
+      list ??= body.createDiv("la-task-list");
+      await this.renderTaskRow(list, part.ref);
+    }
+  }
+
+  private async renderTaskRow(list: HTMLElement, ref: TaskRef): Promise<void> {
+    const row = list.createDiv({ cls: "la-task-row" + (ref.done ? " is-done" : ""), attr: { "data-source": ref.path } });
+    const check = row.createDiv({
+      cls: "la-check",
+      attr: { role: "checkbox", "aria-checked": String(ref.done), tabindex: "0", "aria-label": ref.done ? "Mark as not done" : "Mark as done" },
+    });
+    const { main, meta } = splitTaskText(ref.text);
+    const textEl = row.createDiv("la-task-body");
+    const mainEl = textEl.createDiv("la-task-text");
+    const hasMd = (s: string) => /\[\[|\*\*|`|\]\(|https?:\/\//.test(s);
+    if (hasMd(main)) await MarkdownRenderer.render(this.app, main, mainEl, ref.path, this);
+    else mainEl.setText(main);
+    if (meta) {
+      const metaEl = textEl.createDiv("la-task-meta");
+      if (hasMd(meta)) await MarkdownRenderer.render(this.app, meta, metaEl, ref.path, this);
+      else metaEl.setText(meta);
+    }
+
+    const toggle = async (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (row.hasClass("is-busy")) return;
+      row.addClass("is-busy");
+      try {
+        ref.done = await this.plugin.toggleTaskRef(ref);
+        row.toggleClass("is-done", ref.done);
+        check.setAttr("aria-checked", String(ref.done));
+        check.setAttr("aria-label", ref.done ? "Mark as not done" : "Mark as done");
+      } catch (err: any) {
+        new Notice(err?.message ?? String(err));
+      } finally {
+        row.removeClass("is-busy");
+      }
+    };
+    check.addEventListener("click", toggle);
+    check.addEventListener("keydown", (e) => {
+      if (e.key === " " || e.key === "Enter") void toggle(e);
+    });
+    // the bubble's long-press menu must not start from a tap on the circle
+    check.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+
+    // tapping the task text opens the note scrolled to that task (links inside keep their own behavior)
+    textEl.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("a")) return;
+      e.stopPropagation();
+      const file = this.app.vault.getAbstractFileByPath(ref.path);
+      if (file instanceof TFile) void this.app.workspace.getLeaf("tab").openFile(file, { eState: { line: ref.line - 1 } });
+    });
   }
 }
